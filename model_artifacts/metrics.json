@@ -1,0 +1,36 @@
+{
+  "created_at": "2026-02-06T12:33:52.440779",
+  "seed": 42,
+  "target": "graph_weight",
+  "train_rows": 18013,
+  "test_rows": 4504,
+  "split_strategy": "random",
+  "cutoff_date": null,
+  "features": {
+    "numeric": [
+      "discontinued_n",
+      "started_n",
+      "completed_n",
+      "rate_vs_trial_start",
+      "base_rate",
+      "size_factor_log1p_started",
+      "recency_decay",
+      "evidence_quality",
+      "enrollment_count",
+      "num_countries",
+      "total_sites"
+    ],
+    "categorical": [
+      "reason",
+      "period_title",
+      "arm_id",
+      "search_condition",
+      "sponsor_class"
+    ]
+  },
+  "metrics": {
+    "mae": 0.0013957294994830162,
+    "rmse": 0.013140736327247115,
+    "r2": 0.978013160610486
+  }
+}

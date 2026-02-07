@@ -1,0 +1,25 @@
+reason,period_title,events,avg_predicted_weight,max_predicted_weight,unique_trials
+Death,Overall Study,13,1.4599722879461097,1.805735040207539,8
+Ongoing in study,Overall Study,3,1.7978625057790178,1.8242216850988096,1
+Reason not Specified,Overall Study,3,0.9985399425529927,1.0986833874941064,2
+Study terminated by sponsor,Overall Study,2,2.2174540010226895,2.219005476516797,1
+Progressive disease,Overall Study,2,1.713426306218571,1.762508928968928,1
+Progressive Disease,Treatment Period,2,1.4667484763391592,1.582670871442588,1
+Enrolled in Long-term Extension Study,Overall Study,2,1.2629611609706792,1.5512240627627474,1
+Death,Part 2 Double Blind Epoch,2,1.4734323370587754,1.5273685198714688,1
+Providers not included in the primary outcome.,Overall Study,2,1.3123345829833633,1.5215299005213387,1
+Lack of Efficacy,Overall Study,2,1.2249092455658532,1.3808404116286703,1
+Other,Overall Study,2,1.1623780278870184,1.2044633268145435,1
+Disease progression,Treated Participants,2,1.1880685519166039,1.190941771826068,1
+End of data collection,Overall Study,2,1.1417641977151884,1.1903651423322312,2
+Overall trial ended,Overall Study,1,2.408476524575636,2.408476524575636,1
+Progressive Disease,Overall Study,1,2.020845865703722,2.020845865703722,1
+"Berotralstat Provided by alternative Means (i.e., Early Access Program or Commercially Available)",Overall Study,1,1.8710787007392653,1.8710787007392653,1
+Subject/guardian Decision,Part 2 Double Blind Epoch,1,1.3220826951821332,1.3220826951821332,1
+Run-in failure,Run-in Period (12 Weeks),1,1.2131649081502076,1.2131649081502076,1
+Ongoing,Overall Study,1,1.119378420077738,1.119378420077738,1
+Progression of Disease,Treatment Phase,1,1.0427026941450186,1.0427026941450186,1
+Study terminated by Sponsor,Overall Study,1,0.992581445140874,0.992581445140874,1
+Patient Still in Follow-up,Overall Study,1,0.9785711341386896,0.9785711341386896,1
+Discontinued at clinical cutoff (due to end of data collection period),Overall Study,1,0.977018963548532,0.977018963548532,1
+Discontinued by Sponsor,Overall Study,1,0.9509950136264094,0.9509950136264094,1
