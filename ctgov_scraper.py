@@ -196,58 +196,42 @@ def extract_locations(protocol: dict) -> dict:
 
 
 def extract_participant_flow(results: dict) -> dict:
-    """Extract participant flow data, including robust dropout metrics."""
+    """Extract participant flow data — the core dropout information."""
     flow = results.get("participantFlowModule", {})
     if not flow:
         return {
             "has_participant_flow": False,
             "flow_groups": "",
             "flow_periods": "",
-            "milestone_events": "",
-            "dropout_events": "",
-            "num_periods": 0,
             "total_started": None,
             "total_completed": None,
             "total_discontinued": None,
             "dropout_rate": None,
             "discontinuation_reasons": "",
-            "top_dropout_reason": None,
-            "top_dropout_reason_count": None,
-            "dropout_reference_period": None,
-            "dropout_reference_method": None,
-            "dropout_completed_capped": False,
         }
 
     # Extract groups (arms)
     groups = flow.get("groups", [])
     group_info = []
     for g in groups:
-        group_info.append(
-            {
-                "id": g.get("id"),
-                "title": g.get("title"),
-                "description": g.get("description", "")[:200],
-            }
-        )
+        group_info.append({
+            "id": g.get("id"),
+            "title": g.get("title"),
+            "description": g.get("description", "")[:200],
+        })
 
-    # Extract periods (enrollment -> treatment -> follow-up)
+    # Extract periods (enrollment → treatment → follow-up)
     periods = flow.get("periods", [])
     period_data = []
     milestone_events = []
     dropout_events = []
-    period_totals = []
-    total_started = None
-    total_completed = None
+    total_started = 0
+    total_completed = 0
     total_discontinued = 0
     discontinuation_reasons = {}
-    dropout_reference_period = None
-    dropout_reference_method = None
-    dropout_completed_capped = False
 
     for period in periods:
         p_title = period.get("title", "")
-        period_started = 0
-        period_completed = 0
 
         # Milestones (Started, Completed, Not Completed)
         milestones = period.get("milestones", [])
@@ -261,21 +245,18 @@ def extract_participant_flow(results: dict) -> dict:
                 except (ValueError, TypeError):
                     count = 0
 
-                if ms_type.upper() == "STARTED":
-                    period_started += count
-                elif ms_type.upper() == "COMPLETED":
-                    period_completed += count
+                if ms_type.upper() == "STARTED" and period == periods[0]:
+                    total_started += count
+                elif ms_type.upper() == "COMPLETED" and period == periods[-1]:
+                    total_completed += count
+                milestone_events.append({
+                    "period_title": p_title,
+                    "milestone_type": ms_type,
+                    "group_id": ach.get("groupId"),
+                    "count": count,
+                })
 
-                milestone_events.append(
-                    {
-                        "period_title": p_title,
-                        "milestone_type": ms_type,
-                        "group_id": ach.get("groupId"),
-                        "count": count,
-                    }
-                )
-
-        # Drop withdrawals, the key dropout data.
+        # Drop withdrawals — the key dropout data
         drop_withdraws = period.get("dropWithdraws", [])
         for dw in drop_withdraws:
             reason = dw.get("type", "Unknown")
@@ -289,67 +270,28 @@ def extract_participant_flow(results: dict) -> dict:
                     count = 0
                 reason_total += count
                 total_discontinued += count
-                dropout_events.append(
-                    {
-                        "period_title": p_title,
-                        "reason": reason,
-                        "group_id": c.get("groupId"),
-                        "discontinued_n": count,
-                    }
-                )
+                dropout_events.append({
+                    "period_title": p_title,
+                    "reason": reason,
+                    "group_id": c.get("groupId"),
+                    "discontinued_n": count,
+                })
 
             if reason in discontinuation_reasons:
                 discontinuation_reasons[reason] += reason_total
             else:
                 discontinuation_reasons[reason] = reason_total
 
-        period_data.append(
-            {
-                "title": p_title,
-                "num_milestones": len(milestones),
-                "num_drop_reasons": len(drop_withdraws),
-            }
-        )
-        period_totals.append(
-            {
-                "title": p_title,
-                "started": period_started,
-                "completed": period_completed,
-            }
-        )
-
-    # Pick a consistent denominator period for dropout metrics.
-    # Prefer "Overall Study" if present; otherwise use the period with the
-    # largest STARTED count to avoid cross-segment denominator mismatches.
-    reference_period = None
-    overall_candidates = [
-        p for p in period_totals if p["started"] > 0 and "overall" in (p["title"] or "").lower()
-    ]
-    if overall_candidates:
-        reference_period = max(overall_candidates, key=lambda p: p["started"])
-        dropout_reference_method = "overall_period"
-    else:
-        started_candidates = [p for p in period_totals if p["started"] > 0]
-        if started_candidates:
-            reference_period = max(started_candidates, key=lambda p: p["started"])
-            dropout_reference_method = "max_started_period"
-
-    if reference_period:
-        dropout_reference_period = reference_period["title"]
-        total_started = reference_period["started"]
-        total_completed = reference_period["completed"]
-
-        if total_started > 0 and total_completed > total_started:
-            total_completed = total_started
-            dropout_completed_capped = True
+        period_data.append({
+            "title": p_title,
+            "num_milestones": len(milestones),
+            "num_drop_reasons": len(drop_withdraws),
+        })
 
     # Calculate dropout rate
     dropout_rate = None
-    if total_started and total_started > 0:
-        dropout_rate = round(
-            max(0.0, min(100.0, (total_started - (total_completed or 0)) / total_started * 100)),
-            1,
-        )
+    if total_started > 0:
+        dropout_rate = round((total_started - total_completed) / total_started * 100, 1)
 
     # Sort discontinuation reasons by frequency
     sorted_reasons = sorted(discontinuation_reasons.items(), key=lambda x: -x[1])
@@ -369,9 +311,6 @@ def extract_participant_flow(results: dict) -> dict:
         "discontinuation_reasons": reasons_str,
         "top_dropout_reason": sorted_reasons[0][0] if sorted_reasons else None,
         "top_dropout_reason_count": sorted_reasons[0][1] if sorted_reasons else None,
-        "dropout_reference_period": dropout_reference_period,
-        "dropout_reference_method": dropout_reference_method,
-        "dropout_completed_capped": dropout_completed_capped,
     }
 
 
@@ -731,10 +670,9 @@ def run_scraper():
             for study in studies:
                 protocol = study.get("protocolSection", {})
                 nct_id = protocol.get("identificationModule", {}).get("nctId")
-                enrollment_raw = protocol.get("designModule", {}).get("enrollmentInfo", {}).get("count")
-                enrollment = _to_int(enrollment_raw)
+                enrollment = protocol.get("designModule", {}).get("enrollmentInfo", {}).get("count", 0)
 
-                if nct_id and enrollment is not None and enrollment >= MIN_ENROLLMENT:
+                if nct_id and enrollment and enrollment >= MIN_ENROLLMENT:
                     if nct_id not in all_nct_ids:
                         all_nct_ids[nct_id] = condition
                         condition_count += 1
