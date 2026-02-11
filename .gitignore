@@ -5,3 +5,6 @@ node_modules/
 dist/
 .env
 .claude/
+HANDOVER-*.md
+tasks/todo.md
+tasks/lessons.md

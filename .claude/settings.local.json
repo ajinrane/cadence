@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "command": "python3 .claude/hooks/pre-compact-handover.py"
+      }
+    ]
+  }
+}
