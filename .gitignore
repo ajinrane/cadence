@@ -7,3 +7,6 @@ venv/
 .venv/
 *.egg-info/
 .DS_Store
+HANDOVER-*.md
+tasks/todo.md
+tasks/lessons.md

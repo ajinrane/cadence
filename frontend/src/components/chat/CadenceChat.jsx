@@ -296,32 +296,16 @@ export default function CadenceChat() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50">
-      {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-sm">
-            <span className="text-white font-bold text-sm">C</span>
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-slate-800 leading-tight">Cadence</h1>
-            <p className="text-xs text-slate-400">CRC Operating System</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className={`flex items-center gap-1.5 text-xs ${isConnected ? "text-emerald-600" : "text-red-500"}`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-emerald-500" : "bg-red-500"} animate-pulse`} />
-            {isConnected ? "Connected" : "Disconnected"}
-          </div>
-          <button
-            onClick={handleReset}
-            className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded hover:bg-slate-100 transition-all"
-          >
-            Reset
-          </button>
-        </div>
-      </header>
+    <div className="flex flex-col h-full bg-slate-50">
+      {/* Compact header */}
+      <div className="flex items-center justify-end px-4 py-2 bg-white border-b border-slate-100">
+        <button
+          onClick={handleReset}
+          className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded hover:bg-slate-100 transition-all"
+        >
+          Reset Chat
+        </button>
+      </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4">

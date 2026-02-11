@@ -24,7 +24,24 @@
       "Bash(grep:*)",
       "Bash(tar:*)",
       "Bash(ls:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(python -m venv:*)",
+      "Bash(venv/Scripts/pip install:*)",
+      "Bash(python -c:*)",
+      "Bash(venv/Scripts/python.exe -m pip:*)",
+      "Bash(venv/Scripts/uvicorn main:app --reload --port 8000)",
+      "Bash(curl:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(npx vite:*)",
+      "Bash(timeout:*)"
+    ]
+  },
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "command": "python3 .claude/hooks/pre-compact-handover.py"
+      }
     ]
   }
 }

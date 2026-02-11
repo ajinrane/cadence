@@ -25,6 +25,17 @@ class ActionType(str, Enum):
     SEARCH_KNOWLEDGE = "search_knowledge"
     GET_TRIAL_INFO = "get_trial_info"
     GET_PATIENT_TIMELINE = "get_patient_timeline"
+    # New in v2
+    LIST_TASKS = "list_tasks"
+    GET_TODAY_TASKS = "get_today_tasks"
+    COMPLETE_TASK = "complete_task"
+    SEARCH_PROTOCOLS = "search_protocols"
+    GET_PATIENT_SUMMARY = "get_patient_summary"
+    GET_MONITORING_PREP = "get_monitoring_prep"
+    GET_INTERVENTION_STATS = "get_intervention_stats"
+    GET_OPEN_QUERIES = "get_open_queries"
+    GET_SITE_ANALYTICS = "get_site_analytics"
+    GENERATE_HANDOFF = "generate_handoff"
 
 
 @dataclass
@@ -48,7 +59,7 @@ class ActionResult:
 class ActionProvider(ABC):
     """
     Base class for action execution backends.
-    
+
     Implement this interface for each execution environment:
     - DatabaseActionProvider: v1, queries Supabase
     - DesktopActionProvider: v2, controls screen via Anthropic computer use
