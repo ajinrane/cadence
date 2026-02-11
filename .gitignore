@@ -1,7 +1,9 @@
-model_artifacts/dropout_weight_model.joblib
-*.pyc
-__pycache__/
 node_modules/
 dist/
 .env
-.claude/
+*.pyc
+__pycache__/
+venv/
+.venv/
+*.egg-info/
+.DS_Store

@@ -1,128 +1,115 @@
-# ClinicalTrials.gov Cardiometabolic Dropout Scraper
+# Cadence — CRC Operating System
 
-Pulls completed Phase III cardiometabolic trials from ClinicalTrials.gov API v2 and extracts participant flow, dropout patterns, protocol details, and site distribution data.
+AI-powered operating system for Clinical Research Coordinators. Prevents clinical trial patient dropout by preserving institutional knowledge and predicting risk.
 
-## Setup
+## Architecture
 
+```
+┌─────────────────────────────────────┐
+│  PRESENTATION (swappable)           │
+│  v1: React web chat ← YOU ARE HERE  │
+│  v2: Desktop copilot (Electron)     │
+│  v3: Mobile (React Native)          │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│  AGENT CORE                         │
+│  Planner → Executor → Actions       │
+│  LLM-agnostic (Claude / OpenAI)     │
+│  Cost tracking per request          │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│  ACTION LAYER (swappable)           │
+│  v1: Database queries ← YOU ARE HERE│
+│  v2: Desktop control (screen)       │
+│  v3: CTMS APIs (Medidata, Veeva)    │
+└─────────────────────────────────────┘
+```
+
+The agent core stays the same regardless of interface or execution backend. To add desktop copilot support later, implement `DesktopActionProvider` with the same interface as `DatabaseActionProvider`.
+
+## Quick Start
+
+### Backend
 ```bash
-pip install requests pandas scikit-learn joblib numpy
+cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your API key(s)
+
+# Run
+uvicorn main:app --reload --port 8000
 ```
 
-## Usage
-
+### Frontend
 ```bash
-python ctgov_scraper.py
+cd frontend
+npm install
+npm run dev
 ```
 
-Runtime depends on the number of matching trials. Expect 15-45 minutes due to API rate limiting (~50 requests/min).
+Open http://localhost:5173 — the chat interface connects to the backend automatically.
 
-## Outputs
+## Swapping LLM Providers
 
-| File | Format | Contents |
-|------|--------|----------|
-| `ctgov_cardiometabolic_trials.json` | JSON | Full structured data with metadata |
-| `ctgov_cardiometabolic_trials.csv` | CSV | Flattened records for spreadsheet analysis |
-| `ctgov_dropout_analysis.csv` | CSV | Dropout-focused view sorted by dropout rate |
-| `ctgov_graph_nodes.csv` | CSV | Graph node table (trial, arm, period, outcome, country) |
-| `ctgov_graph_edges.csv` | CSV | Graph edge table with dropout-event weights |
-| `ctgov_graph_provenance.csv` | CSV | Trial-level extraction and confidence metadata |
-
-## Train Model
-
-After running the scraper, train a baseline dropout-weight model:
-
+Change two env vars in `backend/.env`:
 ```bash
-python train_dropout_model.py
+# Use Claude (default)
+LLM_PROVIDER=claude
+LLM_MODEL=claude-sonnet-4-20250514
+
+# Use OpenAI
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o
+
+# Use cheaper models
+LLM_MODEL=claude-haiku-4-5-20251001
+LLM_MODEL=gpt-4o-mini
 ```
 
-Optional args:
+Cost tracking is automatic — check `/api/usage` for per-request and cumulative costs.
 
-```bash
-python train_dropout_model.py --edges ctgov_graph_edges.csv --nodes ctgov_graph_nodes.csv --output-dir model_artifacts --target graph_weight --test-size 0.2
-```
+## API Endpoints
 
-Training outputs (in `model_artifacts/` by default):
-- `dropout_weight_model.joblib` - serialized sklearn pipeline + metadata
-- `metrics.json` - split settings and MAE/RMSE/R2
-- `feature_importance.csv` - ranked feature importances
-- `scored_dropout_events.csv` - predictions vs actual weights for all rows
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/chat` | POST | Main agent endpoint |
+| `/api/chat/reset` | POST | Reset conversation |
+| `/api/patients` | GET | List patients (filterable) |
+| `/api/patients/{id}` | GET | Patient details |
+| `/api/trials` | GET | Trial list |
+| `/api/dashboard` | GET | Summary stats |
+| `/api/usage` | GET | LLM cost tracking |
+| `/api/health` | GET | Health check |
 
-## Predict Risk
+## Example Queries
 
-Score existing graph dropout events (ranked for CRC prioritization):
+- "Show me all high-risk patients"
+- "Which patients have overdue visits in the NASH trial?"
+- "What retention strategies work for fasting visits?"
+- "Give me a summary of patient PT-1234-001"
+- "Schedule a follow-up call for patients at risk this week"
 
-```bash
-python predict_dropout_risk.py --from-graph
-```
+## Fake Data
 
-Score new context rows:
+The app ships with realistic fake data:
+- 3 trials (NASH, Alzheimer's, Heart Failure/GLP-1)
+- ~135 patients with risk scores, timelines, and visit histories
+- 7 institutional knowledge base entries from "experienced CRCs"
 
-```bash
-python predict_dropout_risk.py --input new_dropout_contexts.csv
-```
+## Future: Desktop Copilot Migration
 
-If `new_dropout_contexts.csv` does not exist, the script creates a template with required model feature columns.
+When ready to add desktop control:
 
-Prediction output:
-- `model_artifacts/dropout_risk_predictions.csv`
+1. Create `backend/agent/actions/desktop.py`
+2. Implement `DesktopActionProvider(ActionProvider)`
+3. Same action types (schedule_visit, send_reminder, etc.) but executed via screen control
+4. Swap the provider in `main.py`
+5. Build Electron/Tauri shell around the frontend
 
-## What It Captures
-
-**Participant Flow (Dropout Data)**
-- Total started, completed, discontinued per trial
-- Dropout rate calculation
-- Discontinuation reasons with counts (e.g., "Adverse Event (23); Lost to Follow-up (15); Withdrawal by Subject (12)")
-- Top dropout reason per trial
-
-**Protocol Details**
-- Trial design (arms, allocation, masking)
-- Conditions, interventions, eligibility criteria
-- Outcome measures and timeframes
-- Start/completion dates, enrollment
-
-**Site Distribution**
-- Total sites, number of countries
-- Geographic breakdown by country and state
-- Sponsor and sponsor class
-
-## Conditions Searched
-
-The scraper queries these cardiometabolic conditions:
-- Diabetes type 2, NASH/MASH, cardiovascular disease
-- Heart failure, atherosclerosis, dyslipidemia
-- Hypertension, obesity, metabolic syndrome
-
-Filters: Phase 3 | Completed | Has Results | Enrollment >= 200
-
-## Customization
-
-Edit the configuration section at the top of `ctgov_scraper.py`:
-
-- `CONDITION_QUERIES` - add/remove condition search terms
-- `MIN_ENROLLMENT` - change minimum enrollment threshold
-- `RATE_LIMIT_DELAY` - adjust delay between API calls (don't go below 1.0s)
-
-## Using in Claude Code
-
-This script is designed to be run as-is in Claude Code:
-
-```bash
-claude "Run the ClinicalTrials.gov scraper and summarize the dropout patterns"
-```
-
-Or add to your project's CLAUDE.md:
-
-```markdown
-## Data Pipeline
-- `ctgov_scraper.py` pulls cardiometabolic trial dropout data from ClinicalTrials.gov
-- Output CSVs are in the project root
-- Run periodically to refresh data (API data updates as new results are posted)
-```
-
-## Data Notes
-
-- Not all completed trials have results posted - the API filters for `HasResults`
-- Participant flow data quality varies; some trials report minimal dropout reasons
-- Enrollment count may be "ESTIMATED" vs "ACTUAL" - check `enrollment_type` field
-- Dropout rate is calculated as `(started - completed) / started` using first and last periods
-- Trials may appear under multiple condition searches; deduplication is by NCT ID
+The agent planner and LLM layer remain untouched.

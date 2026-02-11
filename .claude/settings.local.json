@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(timeout 8 npx vite:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(timeout 8 npm run dev:*)",
+      "Bash(git status:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(xxd:*)",
+      "Bash(git -C \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\" branch -a)",
+      "Bash(git -C \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\" log --oneline origin/main..origin/master)",
+      "Bash(git -C \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\" log --oneline origin/master..origin/main)",
+      "Bash(git -C \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\" remote show origin)",
+      "Bash(findstr:*)",
+      "Bash(git -C \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\" push origin --delete main)",
+      "Bash(npm run dev:*)",
+      "Bash(bash)",
+      "Bash(git -C \"c:/Users/waffl/OneDrive/Desktop/CT_Scraper\" checkout -b v2-agent)",
+      "Bash(grep:*)",
+      "Bash(tar:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)"
+    ]
+  }
+}
