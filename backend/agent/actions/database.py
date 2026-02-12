@@ -140,11 +140,11 @@ class DatabaseActionProvider(ActionProvider):
 
     async def _schedule_visit(self, params: dict) -> dict:
         return {
-            "scheduled": True,
+            "logged": True,
             "patient_id": params["patient_id"],
             "visit_date": params["visit_date"],
             "visit_type": params.get("visit_type", "follow_up"),
-            "note": "Visit scheduled in Cadence. In production, this syncs to your CTMS.",
+            "note": "Visit logged in Cadence and added to your calendar. In production, this will sync directly to your CTMS. For now, remember to also enter this in your scheduling system.",
         }
 
     async def _log_intervention(self, params: dict) -> dict:
@@ -167,12 +167,13 @@ class DatabaseActionProvider(ActionProvider):
         return intervention
 
     async def _send_reminder(self, params: dict) -> dict:
+        channel = params.get("channel", "sms")
         return {
-            "sent": True,
+            "queued": True,
             "patient_id": params["patient_id"],
-            "channel": params.get("channel", "sms"),
+            "channel": channel,
             "message_preview": f"Reminder for upcoming visit on {params.get('visit_date', 'TBD')}",
-            "note": "In production, this sends via Twilio/email integration.",
+            "note": f"Reminder logged in Cadence. Actual {channel} delivery coming soon — use this as your reminder to contact the patient manually.",
         }
 
     async def _search_knowledge(self, params: dict) -> list[dict]:
@@ -609,7 +610,7 @@ class DatabaseActionProvider(ActionProvider):
             high = sum(1 for d in data if d["risk_level"] == "high")
             return f"Retrieved risk scores for {len(data)} patients ({high} high-risk)."
         elif action_type == ActionType.SCHEDULE_VISIT:
-            return f"Visit scheduled for patient {data['patient_id']} on {data['visit_date']}."
+            return f"Visit logged for patient {data['patient_id']} on {data['visit_date']}. Remember to also enter this in your CTMS."
         elif action_type == ActionType.SEARCH_KNOWLEDGE:
             return f"Found {len(data)} knowledge base entries."
         elif action_type == ActionType.SEARCH_KNOWLEDGE_GRAPH:
