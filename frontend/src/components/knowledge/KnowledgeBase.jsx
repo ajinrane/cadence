@@ -379,7 +379,7 @@ function StatsPanel({ stats }) {
   );
 }
 
-export default function KnowledgeBase({ currentSiteId }) {
+export default function KnowledgeBase({ currentSiteId, preferences = {} }) {
   const [viewMode, setViewMode] = useState("all"); // all | tier1 | tier2 | tier3
   const [entries, setEntries] = useState([]);
   const [stats, setStats] = useState(null);

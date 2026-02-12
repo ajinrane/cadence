@@ -96,6 +96,11 @@ Trials can span multiple sites (same trial_id, different site_id).
   - knowledge/KnowledgeBase.jsx — Browse/add/search three-tier knowledge (Promise.allSettled for resilience)
   - staff/StaffDirectory.jsx — Team workload overview, expandable cards with patients/tasks
   - admin/AdminPanel.jsx — Admin panel with Overview, Sites, Users, Trials sub-tabs (lazy-loaded)
+  - onboarding/
+    - tabConfigs.js — Per-tab onboarding config (title, description, customization fields)
+    - TabOnboarding.jsx — Reusable tab-level onboarding overlay with dynamic field rendering
+    - SiteSetupWizard.jsx — 5-step wizard for new sites (0 patients)
+    - NewCRCWelcome.jsx — 5-step welcome for new CRCs (handoff briefing, patients, calendar, chat)
 - api/client.js — Centralized API client with JWT headers
 
 ## Design Conventions
@@ -175,6 +180,9 @@ Trials can span multiple sites (same trial_id, different site_id).
 - POST /api/admin/trials — Create trial
 - POST /api/admin/sites/{site_id}/trials — Enroll trial at site
 - DELETE /api/admin/sites/{site_id}/trials/{trial_id} — Remove trial enrollment
+- GET /api/preferences/me — Current user's tab preferences + onboarding state
+- PATCH /api/preferences/me/{tab} — Update preferences for a specific tab
+- PATCH /api/preferences/me/first-login-complete — Mark first login complete
 
 ## Infrastructure Plan (not yet implemented)
 - Database: Neon Postgres (free tier) → AWS RDS at scale
@@ -284,3 +292,12 @@ Track what was built each session so context carries over. Update this at the en
 - AppLayout: inline login form, admin nav item visible only for admin/sponsor roles
 - Non-invasive: existing CRC endpoints stay public, auth only enforced on admin routes
 - Bug fix: TaskCalendar week view missing staffLookup prop on TaskCard
+
+### Session 8 — Onboarding System
+- Site Setup Wizard: 5-step wizard for new sites (0 patients) — welcome, trials, patients, protocol upload, completion
+- New CRC Welcome: 5-step welcome for first-time logins — handoff briefing, patients, calendar, chat suggestions
+- Tab-level onboarding: reusable overlay with per-tab customization fields (select, checkbox_group, number, text_list)
+- Tab configs: 10 tabs configured with title, description, and customization options (calendar, patients, monitoring, analytics, knowledge have prefs)
+- Preferences API: 3 new endpoints (GET/PATCH preferences/me, first-login-complete), user model extended with first_login, preferences, onboarded_tabs
+- Preference wiring: TaskCalendar (default_view), PatientRegistry (default_sort, needs_contact_days), SiteAnalytics (visible_cards), MonitoringPrep and KnowledgeBase accept preferences prop
+- All preferences have sensible defaults — app works identically without any customization

@@ -264,6 +264,9 @@ class SiteTrialEnroll(BaseModel):
     enrolled: Optional[int] = 0
     pi: Optional[str] = ""
 
+class TabPreferences(BaseModel):
+    preferences: dict
+
 
 # -- Routes: Core -------------------------------------------------------------
 
@@ -1086,6 +1089,50 @@ async def get_me(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
+
+
+# -- Routes: Preferences ------------------------------------------------------
+
+@app.get("/api/preferences/me")
+async def get_my_preferences(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {
+        "preferences": user.get("preferences", {}),
+        "first_login": user.get("first_login", False),
+        "onboarded_tabs": user.get("onboarded_tabs", []),
+    }
+
+
+@app.patch("/api/preferences/me/{tab}")
+async def update_tab_preferences(tab: str, data: TabPreferences, request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    full_user = next((u for u in auth.users if u["id"] == user["id"]), None)
+    if not full_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if "preferences" not in full_user:
+        full_user["preferences"] = {}
+    full_user["preferences"][tab] = data.preferences
+    if "onboarded_tabs" not in full_user:
+        full_user["onboarded_tabs"] = []
+    if tab not in full_user["onboarded_tabs"]:
+        full_user["onboarded_tabs"].append(tab)
+    return {"tab": tab, "preferences": full_user["preferences"][tab]}
+
+
+@app.patch("/api/preferences/me/first-login-complete")
+async def mark_first_login_complete(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    full_user = next((u for u in auth.users if u["id"] == user["id"]), None)
+    if not full_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    full_user["first_login"] = False
+    return {"status": "ok"}
 
 
 # -- Routes: Admin (requires admin/sponsor role) ------------------------------

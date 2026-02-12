@@ -10,6 +10,10 @@ import SiteAnalytics from "./components/analytics/SiteAnalytics";
 import HandoffView from "./components/handoff/HandoffView";
 import KnowledgeBase from "./components/knowledge/KnowledgeBase";
 import StaffDirectory from "./components/staff/StaffDirectory";
+import SiteSetupWizard from "./components/onboarding/SiteSetupWizard";
+import NewCRCWelcome from "./components/onboarding/NewCRCWelcome";
+import TabOnboarding from "./components/onboarding/TabOnboarding";
+import { TAB_ONBOARDING_CONFIGS, getDefaultPreferences } from "./components/onboarding/tabConfigs";
 
 const AdminPanel = lazy(() => import("./components/admin/AdminPanel"));
 
@@ -20,6 +24,14 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
   const [currentUser, setCurrentUser] = useState(null);
+
+  // Onboarding state
+  const [userPreferences, setUserPreferences] = useState({});
+  const [onboardedTabs, setOnboardedTabs] = useState([]);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [showSiteSetup, setShowSiteSetup] = useState(false);
+  const [showCRCWelcome, setShowCRCWelcome] = useState(false);
+  const [showTabOnboarding, setShowTabOnboarding] = useState(null);
 
   // Health check + fetch sites + restore auth session on mount
   useEffect(() => {
@@ -43,8 +55,70 @@ export default function App() {
           localStorage.removeItem("cadence_token");
           setCurrentUser(null);
         });
+    } else {
+      setPreferencesLoaded(true);
     }
   }, []);
+
+  // Fetch preferences + detect wizard/welcome when user logs in
+  useEffect(() => {
+    if (!currentUser) {
+      setPreferencesLoaded(true);
+      return;
+    }
+
+    api.getPreferences()
+      .then((data) => {
+        setUserPreferences(data.preferences || {});
+        setOnboardedTabs(data.onboarded_tabs || []);
+        setPreferencesLoaded(true);
+
+        if (data.first_login) {
+          const siteId = currentUser.site_id || currentSiteId;
+          api.patientRegistry({ site_id: siteId })
+            .then((res) => {
+              const count = res.total || 0;
+              if (count === 0) {
+                const done = localStorage.getItem(`cadence_site_setup_${siteId}`);
+                if (!done) setShowSiteSetup(true);
+              } else {
+                setShowCRCWelcome(true);
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {
+        setPreferencesLoaded(true);
+      });
+  }, [currentUser, currentSiteId]);
+
+  // Check for empty site when site changes (any user, not just first_login)
+  useEffect(() => {
+    if (!currentUser || !currentSiteId) return;
+    api.patientRegistry({ site_id: currentSiteId })
+      .then((res) => {
+        const count = res.total || 0;
+        if (count === 0) {
+          const done = localStorage.getItem(`cadence_site_setup_${currentSiteId}`);
+          if (!done) setShowSiteSetup(true);
+        }
+      })
+      .catch(() => {});
+  }, [currentSiteId, currentUser]);
+
+  // Tab onboarding trigger
+  useEffect(() => {
+    if (!currentUser || !preferencesLoaded) return;
+    if (activePage === "admin") return;
+    if (showSiteSetup || showCRCWelcome) return;
+    if (!TAB_ONBOARDING_CONFIGS[activePage]) return;
+    if (!onboardedTabs.includes(activePage)) {
+      setShowTabOnboarding(activePage);
+    } else {
+      setShowTabOnboarding(null);
+    }
+  }, [activePage, onboardedTabs, currentUser, preferencesLoaded, showSiteSetup, showCRCWelcome]);
 
   const handleNavigate = useCallback((page) => {
     setActivePage(page);
@@ -61,13 +135,39 @@ export default function App() {
   const handleLogin = useCallback((token, user) => {
     localStorage.setItem("cadence_token", token);
     setCurrentUser(user);
+    setPreferencesLoaded(false);
   }, []);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem("cadence_token");
     setCurrentUser(null);
+    setUserPreferences({});
+    setOnboardedTabs([]);
+    setPreferencesLoaded(false);
+    setShowSiteSetup(false);
+    setShowCRCWelcome(false);
+    setShowTabOnboarding(null);
     setActivePage((prev) => (prev === "admin" ? "chat" : prev));
   }, []);
+
+  const handleTabOnboardingComplete = useCallback(
+    async (tabName, preferences) => {
+      setShowTabOnboarding(null);
+      setOnboardedTabs((prev) => [...prev, tabName]);
+      if (currentUser) {
+        try {
+          const prefs = preferences || getDefaultPreferences(tabName);
+          await api.updateTabPreferences(tabName, prefs);
+          setUserPreferences((prev) => ({ ...prev, [tabName]: prefs }));
+        } catch {
+          // Best-effort — preferences are not critical
+        }
+      }
+    },
+    [currentUser],
+  );
+
+  const currentSite = sites.find((s) => s.site_id === currentSiteId);
 
   const renderPage = () => {
     switch (activePage) {
@@ -78,17 +178,17 @@ export default function App() {
           </div>
         );
       case "calendar":
-        return <TaskCalendar currentSiteId={currentSiteId} dataVersion={dataVersion} />;
+        return <TaskCalendar currentSiteId={currentSiteId} dataVersion={dataVersion} preferences={userPreferences.calendar} />;
       case "patients":
-        return <PatientRegistry currentSiteId={currentSiteId} dataVersion={dataVersion} />;
+        return <PatientRegistry currentSiteId={currentSiteId} dataVersion={dataVersion} preferences={userPreferences.patients} />;
       case "protocols":
         return <ProtocolManager currentSiteId={currentSiteId} />;
       case "monitoring":
-        return <MonitoringPrep currentSiteId={currentSiteId} />;
+        return <MonitoringPrep currentSiteId={currentSiteId} preferences={userPreferences.monitoring} />;
       case "analytics":
-        return <SiteAnalytics currentSiteId={currentSiteId} />;
+        return <SiteAnalytics currentSiteId={currentSiteId} preferences={userPreferences.analytics} />;
       case "knowledge":
-        return <KnowledgeBase currentSiteId={currentSiteId} />;
+        return <KnowledgeBase currentSiteId={currentSiteId} preferences={userPreferences.knowledge} />;
       case "team":
         return <StaffDirectory currentSiteId={currentSiteId} />;
       case "handoff":
@@ -117,6 +217,43 @@ export default function App() {
       onLogout={handleLogout}
     >
       {renderPage()}
+
+      {/* Tab-level onboarding overlay */}
+      {showTabOnboarding && TAB_ONBOARDING_CONFIGS[showTabOnboarding] && (
+        <TabOnboarding
+          tabName={showTabOnboarding}
+          {...TAB_ONBOARDING_CONFIGS[showTabOnboarding]}
+          onComplete={(prefs) => handleTabOnboardingComplete(showTabOnboarding, prefs)}
+          onUseDefaults={() => handleTabOnboardingComplete(showTabOnboarding, null)}
+        />
+      )}
+
+      {/* New CRC welcome overlay */}
+      {showCRCWelcome && (
+        <NewCRCWelcome
+          siteId={currentUser?.site_id || currentSiteId}
+          siteName={currentSite?.name}
+          userName={currentUser?.name}
+          onComplete={() => setShowCRCWelcome(false)}
+          onNavigate={(page) => {
+            setShowCRCWelcome(false);
+            handleNavigate(page);
+          }}
+        />
+      )}
+
+      {/* Site setup wizard overlay (highest z-index) */}
+      {showSiteSetup && (
+        <SiteSetupWizard
+          siteId={currentSiteId}
+          siteName={currentSite?.name}
+          onComplete={() => setShowSiteSetup(false)}
+          onNavigate={(page) => {
+            setShowSiteSetup(false);
+            handleNavigate(page);
+          }}
+        />
+      )}
     </AppLayout>
   );
 }

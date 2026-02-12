@@ -41,6 +41,9 @@ def init_users():
             "organization_id": None,
             "active": True,
             "password_hash": hash_password("cadence123"),
+            "first_login": False,
+            "preferences": {},
+            "onboarded_tabs": [],
         },
         {
             "id": "user_crc_columbia",
@@ -51,6 +54,9 @@ def init_users():
             "organization_id": "org_columbia",
             "active": True,
             "password_hash": hash_password("cadence123"),
+            "first_login": False,
+            "preferences": {},
+            "onboarded_tabs": [],
         },
         {
             "id": "user_crc_va",
@@ -61,6 +67,9 @@ def init_users():
             "organization_id": "org_va_lb",
             "active": True,
             "password_hash": hash_password("cadence123"),
+            "first_login": False,
+            "preferences": {},
+            "onboarded_tabs": [],
         },
         {
             "id": "user_crc_sinai",
@@ -71,6 +80,9 @@ def init_users():
             "organization_id": "org_sinai",
             "active": True,
             "password_hash": hash_password("cadence123"),
+            "first_login": False,
+            "preferences": {},
+            "onboarded_tabs": [],
         },
     ]
 
@@ -158,6 +170,9 @@ def create_user(data: dict) -> dict:
         "organization_id": data.get("organization_id"),
         "active": True,
         "password_hash": hash_password(data.get("password", "cadence123")),
+        "first_login": data.get("first_login", True),
+        "preferences": {},
+        "onboarded_tabs": [],
     }
     users.append(user)
     return _safe_user(user)
@@ -167,7 +182,7 @@ def update_user(user_id: str, updates: dict) -> dict | None:
     user = next((u for u in users if u["id"] == user_id), None)
     if not user:
         return None
-    for key in ("name", "email", "role", "site_id", "organization_id", "active"):
+    for key in ("name", "email", "role", "site_id", "organization_id", "active", "first_login", "preferences", "onboarded_tabs"):
         if key in updates and updates[key] is not None:
             user[key] = updates[key]
     if "password" in updates and updates["password"]:

@@ -149,7 +149,7 @@ function VisitCard({ visit, isActive, onSelect }) {
   );
 }
 
-export default function MonitoringPrep({ currentSiteId }) {
+export default function MonitoringPrep({ currentSiteId, preferences = {} }) {
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

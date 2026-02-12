@@ -222,12 +222,12 @@ function ExpandedPatientCard({ patient, onAddNote, staffList, staffLookup, onRea
   );
 }
 
-export default function PatientRegistry({ currentSiteId, dataVersion }) {
+export default function PatientRegistry({ currentSiteId, dataVersion, preferences = {} }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
-  const [sortBy, setSortBy] = useState("dropout_risk_score");
+  const [sortBy, setSortBy] = useState(preferences.default_sort || "dropout_risk_score");
   const [sortDir, setSortDir] = useState("desc");
   const [activeFilter, setActiveFilter] = useState(null);
   const [staffList, setStaffList] = useState([]);
@@ -299,7 +299,8 @@ export default function PatientRegistry({ currentSiteId, dataVersion }) {
 
   const today = new Date().toISOString().split("T")[0];
   const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
-  const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString().split("T")[0];
+  const contactDays = preferences.needs_contact_days || 14;
+  const twoWeeksAgo = new Date(Date.now() - contactDays * 86400000).toISOString().split("T")[0];
 
   const filteredPatients = patients
     .filter((p) => {

@@ -116,6 +116,10 @@ export const api = {
   // Auth
   login: (email, password) => post("/api/auth/login", { email, password }),
   me: () => get("/api/auth/me"),
+  // Preferences / Onboarding
+  getPreferences: () => get("/api/preferences/me"),
+  updateTabPreferences: (tab, preferences) => patch(`/api/preferences/me/${tab}`, { preferences }),
+  markFirstLoginComplete: () => patch("/api/preferences/me/first-login-complete"),
   // Admin
   adminOverview: () => get("/api/admin/overview"),
   adminOrganizations: () => get("/api/admin/organizations"),

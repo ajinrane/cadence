@@ -166,7 +166,8 @@ function CrossSiteTable({ data }) {
   );
 }
 
-export default function SiteAnalytics({ currentSiteId }) {
+export default function SiteAnalytics({ currentSiteId, preferences = {} }) {
+  const visibleCards = preferences.visible_cards || ["retention_rate", "patients_at_risk", "query_resolution", "interventions", "monitoring_readiness"];
   const [siteData, setSiteData] = useState(null);
   const [interventionData, setInterventionData] = useState(null);
   const [crossSiteData, setCrossSiteData] = useState(null);
@@ -246,34 +247,44 @@ export default function SiteAnalytics({ currentSiteId }) {
         <div className="space-y-5">
           {/* Stat cards — retention_rate is already a percentage from the backend */}
           <div className="grid grid-cols-5 gap-4">
-            <StatCard
-              label="Retention Rate"
-              value={`${(siteData.retention_rate || 0).toFixed(1)}%`}
-              color="emerald"
-            />
-            <StatCard
-              label="Patients at Risk"
-              value={siteData.risk_distribution?.high || 0}
-              sublabel={`of ${siteData.total_patients || 0}`}
-              color="red"
-            />
-            <StatCard
-              label="Avg Query Days"
-              value={siteData.avg_query_resolution_days?.toFixed(1) || "—"}
-              sublabel="days"
-              color="amber"
-            />
-            <StatCard
-              label="Interventions"
-              value={siteData.interventions_this_month || siteData.interventions_total || 0}
-              sublabel="this month"
-              color="blue"
-            />
-            <StatCard
-              label="Monitoring Ready"
-              value={siteData.monitoring_readiness_pct != null ? `${siteData.monitoring_readiness_pct}%` : "—"}
-              color="purple"
-            />
+            {visibleCards.includes("retention_rate") && (
+              <StatCard
+                label="Retention Rate"
+                value={`${(siteData.retention_rate || 0).toFixed(1)}%`}
+                color="emerald"
+              />
+            )}
+            {visibleCards.includes("patients_at_risk") && (
+              <StatCard
+                label="Patients at Risk"
+                value={siteData.risk_distribution?.high || 0}
+                sublabel={`of ${siteData.total_patients || 0}`}
+                color="red"
+              />
+            )}
+            {visibleCards.includes("query_resolution") && (
+              <StatCard
+                label="Avg Query Days"
+                value={siteData.avg_query_resolution_days?.toFixed(1) || "—"}
+                sublabel="days"
+                color="amber"
+              />
+            )}
+            {visibleCards.includes("interventions") && (
+              <StatCard
+                label="Interventions"
+                value={siteData.interventions_this_month || siteData.interventions_total || 0}
+                sublabel="this month"
+                color="blue"
+              />
+            )}
+            {visibleCards.includes("monitoring_readiness") && (
+              <StatCard
+                label="Monitoring Ready"
+                value={siteData.monitoring_readiness_pct != null ? `${siteData.monitoring_readiness_pct}%` : "—"}
+                color="purple"
+              />
+            )}
           </div>
 
           {/* Charts row — get intervention breakdown from /interventions/stats */}

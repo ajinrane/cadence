@@ -221,11 +221,11 @@ function AddTaskForm({ onSubmit, onCancel, siteId, staffList }) {
   );
 }
 
-export default function TaskCalendar({ currentSiteId, dataVersion }) {
+export default function TaskCalendar({ currentSiteId, dataVersion, preferences = {} }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [view, setView] = useState("week");
+  const [view, setView] = useState(preferences.default_view || "week");
   const [baseDate, setBaseDate] = useState(new Date());
   const [expandedTaskId, setExpandedTaskId] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
