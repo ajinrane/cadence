@@ -331,8 +331,11 @@ function HandoffContent({ data }) {
           {monitoring.readiness && <p>Readiness: {monitoring.readiness}</p>}
           {monitoring.next_visit && (
             <div className="bg-slate-50 rounded p-2.5 mt-2">
-              <p className="font-medium text-slate-700">Next: {monitoring.next_visit.type?.replace(/_/g, " ")}</p>
-              <p className="text-slate-500">Date: {monitoring.next_visit.date}</p>
+              <p className="font-medium text-slate-700">Next: Monitoring Visit</p>
+              <p className="text-slate-500">Date: {monitoring.next_visit.scheduled_date}</p>
+              {monitoring.next_visit.monitor_name && (
+                <p className="text-slate-500">Monitor: {monitoring.next_visit.monitor_name}</p>
+              )}
             </div>
           )}
         </div>

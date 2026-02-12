@@ -1,28 +1,42 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { api } from "../../api/client";
 
 // ── Types ───────────────────────────────────────────────────────────────
 const MessageRole = { USER: "user", AGENT: "agent", SYSTEM: "system" };
 
-// ── API ─────────────────────────────────────────────────────────────────
-async function sendMessage(message, context = null) {
-  const res = await fetch(`${API_BASE}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, context }),
-  });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}
+// ── Toast Component ─────────────────────────────────────────────────────
 
-async function resetChat() {
-  await fetch(`${API_BASE}/api/chat/reset`, { method: "POST" });
-}
-
-async function getUsage() {
-  const res = await fetch(`${API_BASE}/api/usage`);
-  return res.json();
+function Toast({ toasts, onDismiss }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="fixed top-4 right-4 z-50 flex flex-col gap-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border animate-slide-in ${
+            toast.type === "task"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : "bg-blue-50 border-blue-200 text-blue-800"
+          }`}
+          style={{ animation: "slideIn 0.3s ease-out" }}
+        >
+          <span className="text-lg">{toast.type === "task" ? "\u2705" : "\U0001f4a1"}</span>
+          <div className="flex-1">
+            <p className="text-xs font-semibold">{toast.type === "task" ? "Task Created" : "Knowledge Saved"}</p>
+            <p className="text-[11px] opacity-80">{toast.message}</p>
+          </div>
+          <button
+            onClick={() => onDismiss(toast.id)}
+            className="text-slate-400 hover:text-slate-600 ml-2"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ── Components ──────────────────────────────────────────────────────────
@@ -64,7 +78,7 @@ function PatientCard({ patient }) {
       )}
       {patient.recommended_actions?.length > 0 && (
         <div className="mt-1 text-xs text-blue-600 bg-blue-50 rounded px-2 py-1">
-          → {patient.recommended_actions[0]}
+          {"\u2192"} {patient.recommended_actions[0]}
         </div>
       )}
     </div>
@@ -73,18 +87,20 @@ function PatientCard({ patient }) {
 
 function ActionBadge({ action }) {
   const icons = {
-    query_patients: "🔍",
-    get_risk_scores: "📊",
-    schedule_visit: "📅",
-    log_intervention: "📝",
-    send_reminder: "📱",
-    search_knowledge: "📋",
-    get_trial_info: "🧪",
-    get_patient_timeline: "📈",
+    query_patients: "\U0001f50d",
+    get_risk_scores: "\U0001f4ca",
+    schedule_visit: "\U0001f4c5",
+    log_intervention: "\U0001f4dd",
+    send_reminder: "\U0001f4f1",
+    search_knowledge: "\U0001f4cb",
+    get_trial_info: "\U0001f9ea",
+    get_patient_timeline: "\U0001f4c8",
+    create_task: "\u2705",
+    add_site_knowledge: "\U0001f4a1",
   };
   return (
     <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-      {icons[action.type] || "⚡"} {action.description || action.type}
+      {icons[action.type] || "\u26a1"} {action.description || action.type}
     </span>
   );
 }
@@ -155,7 +171,7 @@ function MessageBubble({ message }) {
         {/* Pending approval */}
         {message.pendingActions?.length > 0 && (
           <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
-            <p className="text-xs font-medium text-amber-700 mb-2">⚠️ Needs your approval:</p>
+            <p className="text-xs font-medium text-amber-700 mb-2">{"\u26a0\ufe0f"} Needs your approval:</p>
             {message.pendingActions.map((a, i) => (
               <div key={i} className="flex items-center justify-between mb-1">
                 <span className="text-xs text-amber-600">{a.description}</span>
@@ -214,19 +230,20 @@ function UsageBar({ usage }) {
 
 // ── Main Chat Component ─────────────────────────────────────────────────
 
-export default function CadenceChat() {
+export default function CadenceChat({ currentSiteId, onDataChange }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [usage, setUsage] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [toasts, setToasts] = useState([]);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const toastIdRef = useRef(0);
 
   // Check API connection
   useEffect(() => {
-    fetch(`${API_BASE}/api/health`)
-      .then((r) => r.json())
+    api.health()
       .then(() => setIsConnected(true))
       .catch(() => setIsConnected(false));
   }, []);
@@ -236,13 +253,49 @@ export default function CadenceChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Auto-dismiss toasts
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timer = setTimeout(() => {
+      setToasts((prev) => prev.slice(1));
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [toasts]);
+
+  const addToast = useCallback((type, message) => {
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, type, message }]);
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   // Refresh usage
   const refreshUsage = useCallback(async () => {
     try {
-      const data = await getUsage();
+      const data = await api.usage();
       setUsage(data);
     } catch {}
   }, []);
+
+  // Detect task/knowledge creation from agent response
+  const detectSideEffects = useCallback((actions) => {
+    if (!actions) return;
+    let dataChanged = false;
+    for (const action of actions) {
+      if (action.type === "create_task") {
+        addToast("task", action.description || "New task added to your calendar");
+        dataChanged = true;
+      } else if (action.type === "add_site_knowledge") {
+        addToast("knowledge", action.description || "Knowledge saved to your site");
+        dataChanged = true;
+      } else if (action.type === "reassign_patient" || action.type === "log_intervention") {
+        dataChanged = true;
+      }
+    }
+    if (dataChanged) onDataChange?.();
+  }, [addToast, onDataChange]);
 
   const handleSend = useCallback(
     async (text = null) => {
@@ -255,7 +308,7 @@ export default function CadenceChat() {
       setIsLoading(true);
 
       try {
-        const result = await sendMessage(messageText);
+        const result = await api.chat(messageText, { site_id: currentSiteId });
         const agentMsg = {
           role: MessageRole.AGENT,
           content: result.response,
@@ -265,6 +318,7 @@ export default function CadenceChat() {
           meta: result.meta,
         };
         setMessages((prev) => [...prev, agentMsg]);
+        detectSideEffects(result.actions_taken);
         refreshUsage();
       } catch (err) {
         setMessages((prev) => [
@@ -279,11 +333,11 @@ export default function CadenceChat() {
         inputRef.current?.focus();
       }
     },
-    [input, isLoading, refreshUsage]
+    [input, isLoading, refreshUsage, currentSiteId, detectSideEffects]
   );
 
   const handleReset = async () => {
-    await resetChat();
+    await api.chatReset();
     setMessages([]);
     setUsage(null);
   };
@@ -297,6 +351,9 @@ export default function CadenceChat() {
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
+      {/* Toast notifications */}
+      <Toast toasts={toasts} onDismiss={dismissToast} />
+
       {/* Compact header */}
       <div className="flex items-center justify-end px-4 py-2 bg-white border-b border-slate-100">
         <button
@@ -316,7 +373,7 @@ export default function CadenceChat() {
             </div>
             <h2 className="text-xl font-semibold text-slate-700 mb-2">Hey, what can I help with?</h2>
             <p className="text-sm text-slate-400 max-w-md mb-6">
-              I can help you manage patients, check risk scores, find retention strategies, and keep your trials running smoothly.
+              I can help you manage patients, check risk scores, find retention strategies, create tasks, and keep your trials running smoothly.
             </p>
             <SuggestedQueries onSelect={(q) => handleSend(q)} />
           </div>
@@ -353,7 +410,7 @@ export default function CadenceChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about patients, risk scores, or retention strategies..."
+            placeholder="Ask about patients, create tasks, or share site knowledge..."
             className="flex-1 resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
             rows={1}
             style={{ minHeight: "44px", maxHeight: "120px" }}

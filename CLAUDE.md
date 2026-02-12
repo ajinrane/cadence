@@ -64,36 +64,37 @@ Trials can span multiple sites (same trial_id, different site_id).
   - planner.py — Converts CRC natural language → structured action plans via LLM
   - executor.py — Orchestrates plan → action execution → formatted response
   - actions/
-    - base.py — Abstract ActionProvider interface and ActionType enum (the pluggable layer)
-    - database.py — DatabaseActionProvider (v1: all actions resolve to DB queries)
+    - base.py — Abstract ActionProvider interface and ActionType enum (21 action types)
+    - database.py — DatabaseActionProvider (v1: all actions resolve to DB queries, includes create_task, add_site_knowledge, resolve_patient, staff workload)
     - tasks.py — TaskManager (auto-generates and manages CRC tasks)
     - monitoring.py — MonitoringPrepManager (monitoring visit prep checklists)
-    - handoff.py — HandoffGenerator (compiles site briefing for new CRCs)
+    - handoff.py — HandoffGenerator (compiles site briefing for new CRCs, includes team section)
+    - staff.py — StaffManager (8 seed staff across 3 sites, patient/task assignment, workload tracking)
+  - patient_resolver.py — Fuzzy patient matching (exact ID → partial ID → name → contextual filters)
 - knowledge/
-  - base_knowledge.py — Tier 1: foundational clinical trial knowledge
-  - site_knowledge.py — Tier 2: site-specific institutional knowledge
-  - cross_site_intelligence.py — Tier 3: aggregated patterns across sites
-  - retrieval.py — Unified search across all three tiers
+  - base_knowledge.py — Tier 1: foundational clinical trial knowledge (55 entries)
+  - site_knowledge.py — Tier 2: site-specific institutional knowledge (35 seed entries)
+  - cross_site.py — Tier 3: aggregated patterns across sites (12 entries)
+  - retrieval.py — Unified search across all three tiers with tier weighting
+  - lifecycle.py — Entry status management (active/stale/draft/archived), validation, archival
+  - pattern_detector.py — Analyzes intervention outcomes, generates knowledge suggestions
 - data/
   - seed.py — Fake patient/trial/site data generator
 - auth.py — JWT auth, user model, role-based access
 
 ### Frontend (frontend/src/)
-- App.jsx — Root with state-based routing
+- App.jsx — Root with state-based routing, dataVersion counter for cross-component refresh
 - components/
   - layout/AppLayout.jsx — Sidebar nav + top bar with site name
-  - chat/CadenceChat.jsx — Agent chat interface
-  - calendar/TaskCalendar.jsx — Week/day view task calendar
-  - patients/PatientRegistry.jsx — Patient table with notes, risk indicators
+  - chat/CadenceChat.jsx — Agent chat interface, triggers onDataChange on side effects
+  - calendar/TaskCalendar.jsx — Week/day view task calendar, staff filter, refetches on dataVersion
+  - patients/PatientRegistry.jsx — Patient table with CRC column, staff filter, reassign, refetches on dataVersion
   - protocols/ProtocolManager.jsx — Upload and search protocols
   - monitoring/MonitoringPrep.jsx — Monitoring visit prep checklists
   - analytics/SiteAnalytics.jsx — Retention stats, cross-site comparison
   - handoff/HandoffView.jsx — New CRC briefing document + Q&A
-  - knowledge/KnowledgeBase.jsx — Browse/add/search three-tier knowledge
-  - landing/LandingPage.jsx — Public landing page
-  - auth/LoginPage.jsx — Sign in
-  - auth/RequestAccess.jsx — Access request form
-  - interventions/InterventionTracker.jsx — Log and track interventions
+  - knowledge/KnowledgeBase.jsx — Browse/add/search three-tier knowledge (Promise.allSettled for resilience)
+  - staff/StaffDirectory.jsx — Team workload overview, expandable cards with patients/tasks
 - hooks/useAuth.js — JWT token management
 - context/AuthContext.jsx — Auth state provider
 - api/client.js — Centralized API client with JWT headers
@@ -139,6 +140,26 @@ Trials can span multiple sites (same trial_id, different site_id).
 - GET /api/handoff/{site_id} — Generate handoff report
 - POST /api/auth/login — Login
 - GET /api/auth/me — Current user
+- GET /api/knowledge — List knowledge entries (filterable by tier, site_id, category)
+- GET /api/knowledge/stats — Knowledge stats per tier/site/category + lifecycle
+- GET /api/knowledge/search — Unified search across all tiers
+- GET /api/knowledge/cross-site — Cross-site intelligence insights
+- POST /api/knowledge — Add Tier 2 site-specific knowledge
+- GET /api/knowledge/stale — Entries that need review
+- PATCH /api/knowledge/{id}/validate — Mark entry as still valid
+- PATCH /api/knowledge/{id}/archive — Archive entry
+- GET /api/knowledge/suggestions — AI-generated knowledge suggestions
+- POST /api/knowledge/suggestions/{id}/approve — Approve suggestion → Tier 2
+- POST /api/knowledge/suggestions/{id}/dismiss — Dismiss suggestion
+- GET /api/staff — List staff (filterable by site_id, role)
+- GET /api/staff/{id} — Staff detail + workload
+- POST /api/staff — Add staff member
+- PATCH /api/staff/{id} — Update staff
+- GET /api/staff/{id}/tasks — Tasks assigned to staff member
+- GET /api/staff/{id}/patients — Patients assigned to staff member
+- GET /api/staff/workload — Workload overview per site
+- PATCH /api/tasks/{id}/assign — Reassign task to staff
+- PATCH /api/patients/{id}/assign — Reassign patient primary CRC
 - GET /api/usage — LLM cost tracking
 - GET /api/dashboard — Summary stats
 
@@ -150,7 +171,6 @@ Trials can span multiple sites (same trial_id, different site_id).
 - Target: $0-20/month at current stage
 
 ## What's Next
-- Build knowledge extraction layer (auto-save facts from conversations to knowledge graph)
 - Patient CSV import tool (for pilot onboarding)
 - Deploy to AWS
 - First pilot site conversations
@@ -220,3 +240,25 @@ Track what was built each session so context carries over. Update this at the en
 
 ### Session 4 — Auth & Landing
 - JWT auth, login page, landing page, request access form, site-scoped access, role-based views
+
+### Session 5 — Chat→Task/Knowledge + Knowledge Lifecycle
+- Agent actions: create_task (CRC says "remind me to call X tomorrow" → task created), add_site_knowledge (CRC shares operational knowledge → saved to Tier 2)
+- Knowledge lifecycle: status fields (active/stale/draft/archived), staleness detection, validation/archival endpoints
+- Pattern detector: analyzes intervention outcomes, generates 6 seed AI suggestions (2 per site), approve/dismiss flow
+- KnowledgeBase.jsx: "Suggested Insights" section, "Needs Review" section, status badges, reference counts, confidence indicators
+- CadenceChat.jsx: toast notifications when agent creates tasks or saves knowledge from conversation
+- 6 new API endpoints for lifecycle management (stale, validate, archive, suggestions, approve, dismiss)
+
+### Session 6 — Fuzzy Patient Matching + Staff Management + Bug Fixes
+- PatientResolver: fuzzy matching pipeline (exact ID → partial ID → name → contextual filters like trial/risk/status)
+- StaffManager: 8 seed staff across 3 sites (Columbia 3, VA 3, Sinai 2), auto-assigns patients/tasks by trial specialty
+- Agent integration: resolve_patient, get_staff_workload, reassign_patient actions; executor stores resolved patients in conversation memory
+- Planner updates: natural language patient references ("call Maria"), staff workload queries
+- Handoff integration: team section with staff workload in briefing docs
+- StaffDirectory.jsx: Team tab with workload bars, expandable cards showing patients/tasks, capacity recommendations
+- TaskCalendar.jsx: staff filter dropdown, staff initials on task cards
+- PatientRegistry.jsx: Primary CRC column, staff filter pills, inline reassign form
+- 9 new API endpoints for staff management
+- Bug fix: cross-component refresh via dataVersion counter (chat creates task → calendar/patients refetch)
+- Bug fix: KnowledgeBase.jsx uses Promise.allSettled for resilience (partial failures don't break the page)
+- Bug fix: created frontend/.env for API URL (was missing, causing 404s without Vite proxy)

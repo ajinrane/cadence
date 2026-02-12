@@ -40,10 +40,12 @@ function SortHeader({ label, field, sortBy, sortDir, onSort }) {
   );
 }
 
-function ExpandedPatientCard({ patient, onAddNote }) {
+function ExpandedPatientCard({ patient, onAddNote, staffList, staffLookup, onReassign }) {
   const [noteText, setNoteText] = useState("");
   const [noteCategory, setNoteCategory] = useState("general");
   const [showNoteForm, setShowNoteForm] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
+  const [reassignTo, setReassignTo] = useState("");
   const [summary, setSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
 
@@ -71,7 +73,7 @@ function ExpandedPatientCard({ patient, onAddNote }) {
 
   return (
     <tr>
-      <td colSpan={7} className="px-4 py-4 bg-slate-50 border-b border-slate-100">
+      <td colSpan={8} className="px-4 py-4 bg-slate-50 border-b border-slate-100">
         <div className="grid grid-cols-3 gap-4">
           {/* Risk Factors */}
           <div className="bg-white border border-slate-200 rounded-lg p-4">
@@ -146,7 +148,47 @@ function ExpandedPatientCard({ patient, onAddNote }) {
           <button className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-md hover:bg-slate-50 transition-colors">
             Flag for PI
           </button>
+          {staffList.length > 0 && (
+            <button
+              onClick={() => setShowReassign(!showReassign)}
+              className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
+            >
+              Reassign CRC
+            </button>
+          )}
         </div>
+
+        {showReassign && (
+          <div className="mt-3 flex gap-2 items-center">
+            <span className="text-xs text-slate-500">Current: {staffLookup[patient.primary_crc_id] || "Unassigned"}</span>
+            <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+            <select
+              value={reassignTo}
+              onChange={(e) => setReassignTo(e.target.value)}
+              className="text-xs border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:border-blue-400"
+            >
+              <option value="">Select CRC...</option>
+              {staffList.filter(s => s.role !== "research_assistant" && s.id !== patient.primary_crc_id).map((s) => (
+                <option key={s.id} value={s.id}>{s.name} ({s.role_label})</option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                if (reassignTo) {
+                  onReassign(patient.patient_id, reassignTo);
+                  setShowReassign(false);
+                  setReassignTo("");
+                }
+              }}
+              disabled={!reassignTo}
+              className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Reassign
+            </button>
+          </div>
+        )}
 
         {showNoteForm && (
           <div className="mt-3 flex gap-2 items-end">
@@ -180,7 +222,7 @@ function ExpandedPatientCard({ patient, onAddNote }) {
   );
 }
 
-export default function PatientRegistry({ currentSiteId }) {
+export default function PatientRegistry({ currentSiteId, dataVersion }) {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -188,6 +230,8 @@ export default function PatientRegistry({ currentSiteId }) {
   const [sortBy, setSortBy] = useState("dropout_risk_score");
   const [sortDir, setSortDir] = useState("desc");
   const [activeFilter, setActiveFilter] = useState(null);
+  const [staffList, setStaffList] = useState([]);
+  const [staffFilter, setStaffFilter] = useState("all");
 
   const fetchPatients = useCallback(async () => {
     setLoading(true);
@@ -209,6 +253,21 @@ export default function PatientRegistry({ currentSiteId }) {
     fetchPatients();
   }, [fetchPatients]);
 
+  // Refetch when data changes externally (e.g., patient reassigned via chat)
+  useEffect(() => {
+    if (dataVersion > 0) fetchPatients();
+  }, [dataVersion]);
+
+  // Fetch staff for CRC column + filter
+  useEffect(() => {
+    if (!currentSiteId) return;
+    api.staff({ site_id: currentSiteId })
+      .then((res) => setStaffList(res.staff || []))
+      .catch(() => {});
+  }, [currentSiteId]);
+
+  const staffLookup = Object.fromEntries(staffList.map((s) => [s.id, s.name]));
+
   const handleSort = (field) => {
     if (sortBy === field) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -226,12 +285,26 @@ export default function PatientRegistry({ currentSiteId }) {
     }
   };
 
+  const handleReassign = async (patientId, staffId) => {
+    try {
+      await api.assignPatient(patientId, staffId);
+      // Update local state
+      setPatients((prev) =>
+        prev.map((p) => p.patient_id === patientId ? { ...p, primary_crc_id: staffId } : p)
+      );
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const today = new Date().toISOString().split("T")[0];
   const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
   const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString().split("T")[0];
 
   const filteredPatients = patients
     .filter((p) => {
+      // Staff filter
+      if (staffFilter !== "all" && p.primary_crc_id !== staffFilter) return false;
       if (!activeFilter) return true;
       if (activeFilter === "high_risk") return p.dropout_risk_score >= 0.7;
       if (activeFilter === "overdue") return p.next_visit_date && p.next_visit_date < today;
@@ -266,6 +339,20 @@ export default function PatientRegistry({ currentSiteId }) {
             {filteredPatients.length} of {patients.length} patients
           </p>
         </div>
+
+        {/* Staff filter */}
+        {staffList.length > 0 && (
+          <select
+            value={staffFilter}
+            onChange={(e) => setStaffFilter(e.target.value)}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-600 focus:outline-none focus:border-blue-400"
+          >
+            <option value="all">All Team Members</option>
+            {staffList.filter(s => s.role !== "research_assistant").map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Filter pills */}
@@ -308,6 +395,7 @@ export default function PatientRegistry({ currentSiteId }) {
                 <SortHeader label="Status" field="status" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader label="Next Visit" field="next_visit_date" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader label="Last Contact" field="last_contact_date" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                <th className="text-left text-xs font-medium text-slate-400 uppercase tracking-wider py-3 px-4">Primary CRC</th>
               </tr>
             </thead>
             <tbody>
@@ -338,12 +426,18 @@ export default function PatientRegistry({ currentSiteId }) {
                     </td>
                     <td className="py-3 px-4 text-sm text-slate-600">{p.next_visit_date || "—"}</td>
                     <td className="py-3 px-4 text-sm text-slate-600">{p.last_contact_date || "—"}</td>
+                    <td className="py-3 px-4 text-sm text-slate-600">
+                      {p.primary_crc_id ? staffLookup[p.primary_crc_id] || "—" : "—"}
+                    </td>
                   </tr>
                   {expandedId === p.patient_id && (
                     <ExpandedPatientCard
                       key={`expanded-${p.patient_id}`}
                       patient={p}
                       onAddNote={handleAddNote}
+                      staffList={staffList}
+                      staffLookup={staffLookup}
+                      onReassign={handleReassign}
                     />
                   )}
                 </>

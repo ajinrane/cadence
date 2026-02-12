@@ -11,11 +11,12 @@ from datetime import datetime, timedelta
 class HandoffGenerator:
     """Compiles a comprehensive handoff report for a site."""
 
-    def __init__(self, db, task_manager, protocol_manager, monitoring_manager):
+    def __init__(self, db, task_manager, protocol_manager, monitoring_manager, staff_manager=None):
         self.db = db
         self.task_manager = task_manager
         self.protocol_manager = protocol_manager
         self.monitoring_manager = monitoring_manager
+        self.staff_manager = staff_manager
 
     def generate(self, site_id: str) -> dict:
         """Generate a full handoff briefing for a site."""
@@ -38,6 +39,7 @@ class HandoffGenerator:
             "monitoring_status": self._monitoring_status(site_id),
             "open_queries": self._open_queries(site_id),
             "intervention_history": self._intervention_summary(site_id),
+            "team": self._team_overview(site_id),
         }
 
     def _site_overview(self, site: dict, patients: list[dict]) -> dict:
@@ -252,5 +254,32 @@ class HandoffGenerator:
             "by_outcome": {
                 outcome: len([i for i in interventions if i["outcome"] == outcome])
                 for outcome in ["positive", "neutral", "negative", "pending"]
+            },
+        }
+
+    def _team_overview(self, site_id: str) -> dict:
+        """Staff assignments and workload for the site."""
+        if not self.staff_manager:
+            return {"available": False}
+        staff = self.staff_manager.list_staff(site_id=site_id)
+        workload = self.staff_manager.get_workload(site_id=site_id)
+        return {
+            "available": True,
+            "staff": [
+                {
+                    "name": s["name"],
+                    "role": s.get("role_label", s["role"]),
+                    "email": s["email"],
+                    "patient_count": s.get("patient_count", 0),
+                    "pending_task_count": s.get("pending_task_count", 0),
+                    "utilization_pct": s.get("utilization_pct", 0),
+                }
+                for s in staff
+            ],
+            "workload_summary": {
+                "total_staff": len(workload),
+                "avg_utilization": round(
+                    sum(w.get("utilization_pct", 0) for w in workload) / max(len(workload), 1), 1
+                ),
             },
         }

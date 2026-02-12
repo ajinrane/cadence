@@ -8,12 +8,15 @@ import ProtocolManager from "./components/protocols/ProtocolManager";
 import MonitoringPrep from "./components/monitoring/MonitoringPrep";
 import SiteAnalytics from "./components/analytics/SiteAnalytics";
 import HandoffView from "./components/handoff/HandoffView";
+import KnowledgeBase from "./components/knowledge/KnowledgeBase";
+import StaffDirectory from "./components/staff/StaffDirectory";
 
 export default function App() {
   const [activePage, setActivePage] = useState("chat");
   const [currentSiteId, setCurrentSiteId] = useState("site_columbia");
   const [sites, setSites] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [dataVersion, setDataVersion] = useState(0);
 
   // Health check + fetch sites on mount
   useEffect(() => {
@@ -37,28 +40,36 @@ export default function App() {
     setCurrentSiteId(siteId);
   }, []);
 
+  const handleDataChange = useCallback(() => {
+    setDataVersion((v) => v + 1);
+  }, []);
+
   const renderPage = () => {
     switch (activePage) {
       case "chat":
         return (
           <div className="h-full">
-            <CadenceChat />
+            <CadenceChat currentSiteId={currentSiteId} onDataChange={handleDataChange} />
           </div>
         );
       case "calendar":
-        return <TaskCalendar currentSiteId={currentSiteId} />;
+        return <TaskCalendar currentSiteId={currentSiteId} dataVersion={dataVersion} />;
       case "patients":
-        return <PatientRegistry currentSiteId={currentSiteId} />;
+        return <PatientRegistry currentSiteId={currentSiteId} dataVersion={dataVersion} />;
       case "protocols":
         return <ProtocolManager currentSiteId={currentSiteId} />;
       case "monitoring":
         return <MonitoringPrep currentSiteId={currentSiteId} />;
       case "analytics":
         return <SiteAnalytics currentSiteId={currentSiteId} />;
+      case "knowledge":
+        return <KnowledgeBase currentSiteId={currentSiteId} />;
+      case "team":
+        return <StaffDirectory currentSiteId={currentSiteId} />;
       case "handoff":
         return <HandoffView currentSiteId={currentSiteId} />;
       default:
-        return <CadenceChat />;
+        return <CadenceChat currentSiteId={currentSiteId} />;
     }
   };
 

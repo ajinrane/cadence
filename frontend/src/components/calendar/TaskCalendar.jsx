@@ -9,12 +9,13 @@ const PRIORITY_COLORS = {
 };
 
 const CATEGORY_LABELS = {
-  patient_visit: "Visit",
-  risk_intervention: "Risk",
-  follow_up: "Follow-up",
-  data_query: "Query",
-  monitoring_prep: "Monitor",
-  overdue_visit: "Overdue",
+  visit: "Visit",
+  call: "Call",
+  lab: "Lab",
+  documentation: "Docs",
+  intervention: "Intervention",
+  query: "Query",
+  monitoring: "Monitor",
   general: "General",
 };
 
@@ -45,9 +46,20 @@ function PriorityBadge({ priority }) {
   );
 }
 
-function TaskCard({ task, onComplete, onExpand, isExpanded }) {
+function StaffInitials({ name }) {
+  if (!name) return null;
+  const initials = name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+  return (
+    <span className="text-[9px] font-semibold bg-slate-200 text-slate-600 w-5 h-5 rounded-full flex items-center justify-center shrink-0" title={name}>
+      {initials}
+    </span>
+  );
+}
+
+function TaskCard({ task, onComplete, onExpand, isExpanded, staffLookup }) {
   const c = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.normal;
   const isOverdue = task.due_date < formatDate(new Date()) && task.status !== "completed";
+  const assignedName = staffLookup?.[task.assigned_to];
 
   return (
     <div
@@ -58,6 +70,7 @@ function TaskCard({ task, onComplete, onExpand, isExpanded }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
+          {assignedName && <StaffInitials name={assignedName} />}
           <div className={`w-1.5 h-1.5 rounded-full ${c.dot} shrink-0 mt-1`} />
           <span className={`text-xs font-medium ${c.text} truncate`}>{task.title}</span>
         </div>
@@ -111,13 +124,14 @@ function TaskCard({ task, onComplete, onExpand, isExpanded }) {
   );
 }
 
-function AddTaskForm({ onSubmit, onCancel, siteId }) {
+function AddTaskForm({ onSubmit, onCancel, siteId, staffList }) {
   const [form, setForm] = useState({
     title: "",
     patient_id: "",
     due_date: formatDate(new Date()),
     priority: "normal",
     category: "general",
+    assigned_to: "",
   });
 
   return (
@@ -156,18 +170,34 @@ function AddTaskForm({ onSubmit, onCancel, siteId }) {
             <option value="low">Low</option>
           </select>
         </div>
-        <select
-          value={form.category}
-          onChange={(e) => setForm({ ...form, category: e.target.value })}
-          className="w-full text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-400"
-        >
-          <option value="general">General</option>
-          <option value="patient_visit">Patient Visit</option>
-          <option value="risk_intervention">Risk Intervention</option>
-          <option value="follow_up">Follow-up</option>
-          <option value="data_query">Data Query</option>
-          <option value="monitoring_prep">Monitoring Prep</option>
-        </select>
+        <div className="flex gap-2">
+          <select
+            value={form.category}
+            onChange={(e) => setForm({ ...form, category: e.target.value })}
+            className="flex-1 text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-400"
+          >
+            <option value="general">General</option>
+            <option value="visit">Visit</option>
+            <option value="call">Call</option>
+            <option value="lab">Lab</option>
+            <option value="documentation">Documentation</option>
+            <option value="intervention">Intervention</option>
+            <option value="query">Query</option>
+            <option value="monitoring">Monitoring</option>
+          </select>
+          {staffList.length > 0 && (
+            <select
+              value={form.assigned_to}
+              onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}
+              className="flex-1 text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-400"
+            >
+              <option value="">Assign to...</option>
+              {staffList.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
         <div className="flex gap-2">
           <button
             onClick={() => {
@@ -191,7 +221,7 @@ function AddTaskForm({ onSubmit, onCancel, siteId }) {
   );
 }
 
-export default function TaskCalendar({ currentSiteId }) {
+export default function TaskCalendar({ currentSiteId, dataVersion }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -199,10 +229,23 @@ export default function TaskCalendar({ currentSiteId }) {
   const [baseDate, setBaseDate] = useState(new Date());
   const [expandedTaskId, setExpandedTaskId] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [staffList, setStaffList] = useState([]);
+  const [staffFilter, setStaffFilter] = useState("all");
 
   const weekDates = getWeekDates(baseDate);
   const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const today = formatDate(new Date());
+
+  // Build staff ID → name lookup
+  const staffLookup = {};
+  staffList.forEach(s => { staffLookup[s.id] = s.name; });
+
+  // Fetch staff list once on site change
+  useEffect(() => {
+    api.staff({ site_id: currentSiteId })
+      .then(data => setStaffList(data.staff || []))
+      .catch(() => {});
+  }, [currentSiteId]);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
@@ -222,6 +265,11 @@ export default function TaskCalendar({ currentSiteId }) {
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
+
+  // Refetch when data changes externally (e.g., task created via chat)
+  useEffect(() => {
+    if (dataVersion > 0) fetchTasks();
+  }, [dataVersion]);
 
   const handleComplete = async (taskId) => {
     try {
@@ -248,11 +296,15 @@ export default function TaskCalendar({ currentSiteId }) {
     setBaseDate(d);
   };
 
+  const filteredTasks = staffFilter === "all"
+    ? tasks
+    : tasks.filter(t => t.assigned_to === staffFilter);
+
   const getTasksForDate = (dateStr) => {
-    return tasks.filter((t) => t.due_date === dateStr);
+    return filteredTasks.filter((t) => t.due_date === dateStr);
   };
 
-  const overdueTasks = tasks.filter((t) => t.due_date < today && t.status !== "completed");
+  const overdueTasks = filteredTasks.filter((t) => t.due_date < today && t.status !== "completed");
 
   return (
     <div className="h-full overflow-y-auto p-6">
@@ -261,10 +313,23 @@ export default function TaskCalendar({ currentSiteId }) {
         <div>
           <h1 className="text-lg font-semibold text-slate-800">Task Calendar</h1>
           <p className="text-sm text-slate-400 mt-0.5">
-            {tasks.length} tasks this week &middot; {overdueTasks.length} overdue
+            {filteredTasks.length} tasks this week &middot; {overdueTasks.length} overdue
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Staff filter */}
+          {staffList.length > 0 && (
+            <select
+              value={staffFilter}
+              onChange={(e) => setStaffFilter(e.target.value)}
+              className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-600 focus:outline-none focus:border-blue-400"
+            >
+              <option value="all">All Team</option>
+              {staffList.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
           <div className="flex border border-slate-200 rounded-lg overflow-hidden">
             <button
               onClick={() => setView("week")}
@@ -299,6 +364,7 @@ export default function TaskCalendar({ currentSiteId }) {
           onSubmit={handleCreateTask}
           onCancel={() => setShowAddForm(false)}
           siteId={currentSiteId}
+          staffList={staffList}
         />
       )}
 
@@ -336,6 +402,7 @@ export default function TaskCalendar({ currentSiteId }) {
                 onComplete={handleComplete}
                 onExpand={setExpandedTaskId}
                 isExpanded={expandedTaskId === task.id}
+                staffLookup={staffLookup}
               />
             ))}
           </div>
@@ -401,6 +468,7 @@ export default function TaskCalendar({ currentSiteId }) {
                 onComplete={handleComplete}
                 onExpand={setExpandedTaskId}
                 isExpanded={expandedTaskId === task.id}
+                staffLookup={staffLookup}
               />
             ))}
             {getTasksForDate(formatDate(baseDate)).length === 0 && (

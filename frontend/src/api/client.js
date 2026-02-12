@@ -68,6 +68,28 @@ export const api = {
   // Analytics
   siteAnalytics: (siteId) => get(`/api/analytics/site/${siteId}`),
   crossSiteAnalytics: () => get("/api/analytics/cross-site"),
+  // Knowledge
+  knowledge: (params) => get("/api/knowledge", params),
+  knowledgeStats: () => get("/api/knowledge/stats"),
+  addKnowledge: (data) => post("/api/knowledge", data),
+  searchKnowledge: (query, siteId) => get("/api/knowledge/search", { q: query, site_id: siteId }),
+  crossSiteInsights: () => get("/api/knowledge/cross-site"),
+  staleKnowledge: (siteId) => get("/api/knowledge/stale", { site_id: siteId }),
+  validateKnowledge: (entryId) => patch(`/api/knowledge/${entryId}/validate`),
+  archiveKnowledge: (entryId) => patch(`/api/knowledge/${entryId}/archive`),
+  knowledgeSuggestions: (siteId) => get("/api/knowledge/suggestions", { site_id: siteId }),
+  approveSuggestion: (id) => post(`/api/knowledge/suggestions/${id}/approve`),
+  dismissSuggestion: (id) => post(`/api/knowledge/suggestions/${id}/dismiss`),
+  // Staff
+  staff: (params) => get("/api/staff", params),
+  staffDetail: (id) => get(`/api/staff/${id}`),
+  createStaff: (data) => post("/api/staff", data),
+  updateStaff: (id, data) => patch(`/api/staff/${id}`, data),
+  staffTasks: (id, params) => get(`/api/staff/${id}/tasks`, params),
+  staffPatients: (id) => get(`/api/staff/${id}/patients`),
+  staffWorkload: (siteId) => get("/api/staff/workload", { site_id: siteId }),
+  assignTask: (taskId, staffId) => patch(`/api/tasks/${taskId}/assign`, { staff_id: staffId }),
+  assignPatient: (patientId, staffId) => patch(`/api/patients/${patientId}/assign`, { staff_id: staffId }),
   // Handoff
   handoff: (siteId) => get(`/api/handoff/${siteId}`),
   handoffAsk: (siteId, question) => post(`/api/handoff/${siteId}/ask`, { question }),

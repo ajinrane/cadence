@@ -19,7 +19,10 @@ from agent.actions.database import DatabaseActionProvider
 from agent.actions.tasks import TaskManager
 from agent.actions.monitoring import MonitoringPrepManager
 from agent.actions.handoff import HandoffGenerator
+from agent.actions.staff import StaffManager
+from agent.patient_resolver import PatientResolver
 from agent.protocols import ProtocolManager
+from knowledge import KnowledgeManager
 from data.seed import PatientDatabase
 
 # -- App state ----------------------------------------------------------------
@@ -30,12 +33,15 @@ task_manager: TaskManager | None = None
 protocol_manager: ProtocolManager | None = None
 monitoring_manager: MonitoringPrepManager | None = None
 handoff_generator: HandoffGenerator | None = None
+knowledge_manager: KnowledgeManager | None = None
+staff_manager: StaffManager | None = None
+patient_resolver: PatientResolver | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database and agent on startup."""
-    global db, agent, task_manager, protocol_manager, monitoring_manager, handoff_generator
+    global db, agent, task_manager, protocol_manager, monitoring_manager, handoff_generator, knowledge_manager, staff_manager, patient_resolver
 
     db = PatientDatabase(seed=42)
 
@@ -43,7 +49,10 @@ async def lifespan(app: FastAPI):
     task_manager = TaskManager(db)
     protocol_manager = ProtocolManager(db)
     monitoring_manager = MonitoringPrepManager(db)
-    handoff_generator = HandoffGenerator(db, task_manager, protocol_manager, monitoring_manager)
+    knowledge_manager = KnowledgeManager(db)
+    staff_manager = StaffManager(db, task_manager)
+    handoff_generator = HandoffGenerator(db, task_manager, protocol_manager, monitoring_manager, staff_manager)
+    patient_resolver = PatientResolver(db)
 
     # Initialize LLM + agent
     llm = get_llm()
@@ -53,18 +62,24 @@ async def lifespan(app: FastAPI):
         protocol_manager=protocol_manager,
         monitoring_manager=monitoring_manager,
         handoff_generator=handoff_generator,
+        knowledge_manager=knowledge_manager,
+        staff_manager=staff_manager,
+        patient_resolver=patient_resolver,
     )
     agent = AgentExecutor(llm, action_provider)
 
+    kg_stats = knowledge_manager.get_stats()
     print(f"[OK] Cadence API started")
     print(f"   LLM: {os.environ.get('LLM_PROVIDER', 'claude')} / {os.environ.get('LLM_MODEL', 'default')}")
     print(f"   Sites: {len(db.sites)}")
     print(f"   Patients: {len(db.patients)}")
     print(f"   Trials: {len(db.trials)}")
     print(f"   Tasks: {len(task_manager.tasks)}")
+    print(f"   Staff: {len(staff_manager.staff)}")
     print(f"   Protocols: {len(db.protocols)}")
     print(f"   Interventions: {len(db.interventions)}")
     print(f"   Data queries: {len(db.data_queries)}")
+    print(f"   Knowledge: {kg_stats['total']} entries (T1: {kg_stats['by_tier'][1]}, T2: {kg_stats['by_tier'][2]}, T3: {kg_stats['by_tier'][3]})")
 
     yield
 
@@ -163,6 +178,34 @@ class QueryUpdate(BaseModel):
 class HandoffQuestion(BaseModel):
     question: str
     context: Optional[dict] = None
+
+class StaffCreate(BaseModel):
+    name: str
+    email: str
+    role: str
+    site_id: str
+    specialties: Optional[list[str]] = []
+    max_patient_load: Optional[int] = 20
+
+class StaffUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    active: Optional[bool] = None
+    specialties: Optional[list[str]] = None
+    max_patient_load: Optional[int] = None
+
+class AssignRequest(BaseModel):
+    staff_id: str
+
+class KnowledgeCreate(BaseModel):
+    site_id: str
+    category: str
+    content: str
+    source: str
+    author: Optional[str] = None
+    trial_id: Optional[str] = None
+    tags: Optional[list[str]] = []
 
 
 # -- Routes: Core -------------------------------------------------------------
@@ -737,6 +780,218 @@ async def cross_site_analytics():
         })
 
     return {"sites": sites_data}
+
+
+# -- Routes: Staff -------------------------------------------------------------
+
+@app.get("/api/staff")
+async def list_staff(site_id: Optional[str] = None, role: Optional[str] = None):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    return {"staff": staff_manager.list_staff(site_id=site_id, role=role)}
+
+
+@app.get("/api/staff/workload")
+async def staff_workload(site_id: Optional[str] = None):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    return {
+        "workload": staff_manager.get_workload(site_id=site_id),
+        "capacity": staff_manager.get_capacity_recommendations(),
+    }
+
+
+@app.get("/api/staff/{staff_id}")
+async def get_staff_detail(staff_id: str):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    s = staff_manager.get_staff(staff_id)
+    if not s:
+        raise HTTPException(status_code=404, detail=f"Staff {staff_id} not found")
+    return s
+
+
+@app.post("/api/staff")
+async def create_staff(data: StaffCreate):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    return staff_manager.add_staff(data.model_dump())
+
+
+@app.patch("/api/staff/{staff_id}")
+async def update_staff(staff_id: str, data: StaffUpdate):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    result = staff_manager.update_staff(staff_id, data.model_dump(exclude_none=True))
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Staff {staff_id} not found")
+    return result
+
+
+@app.get("/api/staff/{staff_id}/tasks")
+async def get_staff_tasks(staff_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    tasks = staff_manager.get_staff_tasks(staff_id, start_date=start_date, end_date=end_date)
+    return {"tasks": tasks, "total": len(tasks)}
+
+
+@app.get("/api/staff/{staff_id}/patients")
+async def get_staff_patients(staff_id: str):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    patients = staff_manager.get_staff_patients(staff_id)
+    return {"patients": patients, "total": len(patients)}
+
+
+@app.patch("/api/tasks/{task_id}/assign")
+async def assign_task(task_id: str, data: AssignRequest):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    result = staff_manager.assign_task(task_id, data.staff_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Task or staff not found")
+    return result
+
+
+@app.patch("/api/patients/{patient_id}/assign")
+async def assign_patient(patient_id: str, data: AssignRequest):
+    if not staff_manager:
+        raise HTTPException(status_code=503, detail="Staff manager not initialized")
+    result = staff_manager.assign_patient(patient_id, data.staff_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Patient or staff not found")
+    return result
+
+
+# -- Routes: Knowledge ---------------------------------------------------------
+
+@app.get("/api/knowledge")
+async def list_knowledge(
+    tier: Optional[int] = None,
+    site_id: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    if search:
+        results = knowledge_manager.search(
+            query=search, site_id=site_id, tier=tier, category=category, limit=20
+        )
+        return {"entries": results, "total": len(results)}
+    entries = knowledge_manager.get_entries(tier=tier, site_id=site_id, category=category)
+    return {"entries": entries, "total": len(entries)}
+
+
+@app.get("/api/knowledge/stats")
+async def knowledge_stats():
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    return knowledge_manager.get_stats()
+
+
+@app.get("/api/knowledge/search")
+async def search_knowledge(
+    q: str = "",
+    site_id: Optional[str] = None,
+    tier: Optional[int] = None,
+    category: Optional[str] = None,
+    limit: int = 10,
+):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    results = knowledge_manager.search(
+        query=q, site_id=site_id, tier=tier, category=category, limit=limit
+    )
+    return {"query": q, "results": results, "total": len(results)}
+
+
+@app.get("/api/knowledge/cross-site")
+async def cross_site_insights(
+    category: Optional[str] = None,
+    therapeutic_area: Optional[str] = None,
+):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    insights = knowledge_manager.cross_site.get_insights(
+        category=category, therapeutic_area=therapeutic_area
+    )
+    # Also include dynamic computed insights
+    dynamic = knowledge_manager.cross_site.compute_insights(knowledge_manager.db)
+    return {"insights": insights + dynamic, "total": len(insights) + len(dynamic)}
+
+
+@app.post("/api/knowledge")
+async def add_knowledge(data: KnowledgeCreate):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    entry = knowledge_manager.add_site_entry(
+        site_id=data.site_id,
+        category=data.category,
+        content=data.content,
+        source=data.source,
+        author=data.author,
+        trial_id=data.trial_id,
+        tags=data.tags,
+    )
+    return entry
+
+
+@app.get("/api/knowledge/stale")
+async def stale_knowledge(site_id: Optional[str] = None):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    stale = knowledge_manager.lifecycle.get_stale_entries(site_id=site_id)
+    return {"entries": stale, "total": len(stale)}
+
+
+@app.patch("/api/knowledge/{entry_id}/validate")
+async def validate_knowledge(entry_id: str):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    entry = knowledge_manager.lifecycle.validate(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+    return entry
+
+
+@app.patch("/api/knowledge/{entry_id}/archive")
+async def archive_knowledge(entry_id: str):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    entry = knowledge_manager.lifecycle.archive(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+    return entry
+
+
+@app.get("/api/knowledge/suggestions")
+async def knowledge_suggestions(site_id: Optional[str] = None):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    suggestions = knowledge_manager.pattern_detector.get_suggestions(site_id=site_id)
+    return {"suggestions": suggestions, "total": len(suggestions)}
+
+
+@app.post("/api/knowledge/suggestions/{suggestion_id}/approve")
+async def approve_suggestion(suggestion_id: str):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    entry = knowledge_manager.pattern_detector.approve_suggestion(suggestion_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Suggestion {suggestion_id} not found")
+    return entry
+
+
+@app.post("/api/knowledge/suggestions/{suggestion_id}/dismiss")
+async def dismiss_suggestion(suggestion_id: str):
+    if not knowledge_manager:
+        raise HTTPException(status_code=503, detail="Knowledge manager not initialized")
+    result = knowledge_manager.pattern_detector.dismiss_suggestion(suggestion_id)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Suggestion {suggestion_id} not found")
+    return result
 
 
 # -- Routes: Handoff -----------------------------------------------------------

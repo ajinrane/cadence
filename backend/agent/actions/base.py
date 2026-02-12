@@ -36,6 +36,12 @@ class ActionType(str, Enum):
     GET_OPEN_QUERIES = "get_open_queries"
     GET_SITE_ANALYTICS = "get_site_analytics"
     GENERATE_HANDOFF = "generate_handoff"
+    SEARCH_KNOWLEDGE_GRAPH = "search_knowledge_graph"
+    CREATE_TASK = "create_task"
+    ADD_SITE_KNOWLEDGE = "add_site_knowledge"
+    RESOLVE_PATIENT = "resolve_patient"
+    GET_STAFF_WORKLOAD = "get_staff_workload"
+    REASSIGN_PATIENT = "reassign_patient"
 
 
 @dataclass

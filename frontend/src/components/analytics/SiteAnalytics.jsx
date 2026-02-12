@@ -145,19 +145,18 @@ function CrossSiteTable({ data }) {
               <tr key={site.site_id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                 <td className="py-3 px-5">
                   <div className="text-sm font-medium text-slate-800">{site.site_name || site.name}</div>
-                  <div className="text-xs text-slate-400">{site.location}</div>
                 </td>
                 <td className={`py-3 px-4 text-sm ${retentionColor}`}>
-                  {(retention * 100).toFixed(1)}%
+                  {retention.toFixed(1)}%
                 </td>
-                <td className="py-3 px-4 text-sm text-slate-700">{site.total_patients || site.patients}</td>
+                <td className="py-3 px-4 text-sm text-slate-700">{site.total_patients}</td>
                 <td className="py-3 px-4">
                   <span className={`text-sm ${(site.high_risk || 0) > 5 ? "text-red-600 font-medium" : "text-slate-700"}`}>
                     {site.high_risk || 0}
                   </span>
                 </td>
-                <td className="py-3 px-4 text-sm text-slate-700">{site.total_interventions || site.interventions || 0}</td>
-                <td className="py-3 px-4 text-sm text-slate-700">{site.open_queries || 0}</td>
+                <td className="py-3 px-4 text-sm text-slate-700">{site.interventions_total || 0}</td>
+                <td className="py-3 px-4 text-sm text-slate-700">{site.queries_open || 0}</td>
               </tr>
             );
           })}
@@ -169,6 +168,7 @@ function CrossSiteTable({ data }) {
 
 export default function SiteAnalytics({ currentSiteId }) {
   const [siteData, setSiteData] = useState(null);
+  const [interventionData, setInterventionData] = useState(null);
   const [crossSiteData, setCrossSiteData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -178,11 +178,13 @@ export default function SiteAnalytics({ currentSiteId }) {
     setLoading(true);
     setError(null);
     try {
-      const [site, cross] = await Promise.all([
+      const [site, intv, cross] = await Promise.all([
         api.siteAnalytics(currentSiteId),
+        api.interventionStats(currentSiteId),
         api.crossSiteAnalytics(),
       ]);
       setSiteData(site);
+      setInterventionData(intv);
       setCrossSiteData(cross);
     } catch (err) {
       setError(err.message);
@@ -194,6 +196,19 @@ export default function SiteAnalytics({ currentSiteId }) {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Compute cross-site summary from sites array
+  const crossSiteSummary = crossSiteData?.sites
+    ? {
+        total_patients: crossSiteData.sites.reduce((s, x) => s + (x.total_patients || 0), 0),
+        avg_retention: (
+          crossSiteData.sites.reduce((s, x) => s + (x.retention_rate || 0), 0) /
+          crossSiteData.sites.length
+        ).toFixed(1),
+        total_high_risk: crossSiteData.sites.reduce((s, x) => s + (x.high_risk || 0), 0),
+        total_interventions: crossSiteData.sites.reduce((s, x) => s + (x.interventions_total || 0), 0),
+      }
+    : null;
 
   return (
     <div className="h-full overflow-y-auto p-6">
@@ -229,16 +244,16 @@ export default function SiteAnalytics({ currentSiteId }) {
         <div className="text-center py-12 text-slate-400 text-sm">Loading analytics...</div>
       ) : viewMode === "site" && siteData ? (
         <div className="space-y-5">
-          {/* Stat cards */}
+          {/* Stat cards — retention_rate is already a percentage from the backend */}
           <div className="grid grid-cols-5 gap-4">
             <StatCard
               label="Retention Rate"
-              value={`${((siteData.retention_rate || 0) * 100).toFixed(1)}%`}
+              value={`${(siteData.retention_rate || 0).toFixed(1)}%`}
               color="emerald"
             />
             <StatCard
               label="Patients at Risk"
-              value={siteData.patients_at_risk || siteData.high_risk || 0}
+              value={siteData.risk_distribution?.high || 0}
               sublabel={`of ${siteData.total_patients || 0}`}
               color="red"
             />
@@ -250,29 +265,29 @@ export default function SiteAnalytics({ currentSiteId }) {
             />
             <StatCard
               label="Interventions"
-              value={siteData.interventions_this_month || siteData.total_interventions || 0}
+              value={siteData.interventions_this_month || siteData.interventions_total || 0}
               sublabel="this month"
               color="blue"
             />
             <StatCard
               label="Monitoring Ready"
-              value={siteData.monitoring_readiness ? `${siteData.monitoring_readiness}%` : "—"}
+              value={siteData.monitoring_readiness_pct != null ? `${siteData.monitoring_readiness_pct}%` : "—"}
               color="purple"
             />
           </div>
 
-          {/* Charts row */}
+          {/* Charts row — get intervention breakdown from /interventions/stats */}
           <div className="grid grid-cols-2 gap-5">
             <RiskDistribution distribution={siteData.risk_distribution} />
-            <InterventionBreakdown byType={siteData.interventions_by_type} />
+            <InterventionBreakdown byType={interventionData?.by_type} />
           </div>
 
-          {/* Outcome breakdown */}
-          {siteData.interventions_by_outcome && (
+          {/* Outcome breakdown from intervention stats */}
+          {interventionData?.by_outcome && (
             <div className="bg-white border border-slate-200 rounded-lg p-5">
               <h3 className="text-sm font-semibold text-slate-800 mb-3">Intervention Outcomes</h3>
               <div className="grid grid-cols-4 gap-4">
-                {Object.entries(siteData.interventions_by_outcome).map(([outcome, count]) => {
+                {Object.entries(interventionData.by_outcome).map(([outcome, count]) => {
                   const colors = {
                     positive: "text-emerald-600 bg-emerald-50",
                     neutral: "text-slate-600 bg-slate-50",
@@ -292,27 +307,27 @@ export default function SiteAnalytics({ currentSiteId }) {
         </div>
       ) : viewMode === "cross-site" && crossSiteData ? (
         <div className="space-y-5">
-          {/* Summary cards */}
-          {crossSiteData.summary && (
+          {/* Summary cards computed client-side */}
+          {crossSiteSummary && (
             <div className="grid grid-cols-4 gap-4">
               <StatCard
                 label="Total Patients"
-                value={crossSiteData.summary.total_patients || 0}
+                value={crossSiteSummary.total_patients}
                 color="blue"
               />
               <StatCard
                 label="Avg Retention"
-                value={`${((crossSiteData.summary.avg_retention_rate || 0) * 100).toFixed(1)}%`}
+                value={`${crossSiteSummary.avg_retention}%`}
                 color="emerald"
               />
               <StatCard
                 label="Total At Risk"
-                value={crossSiteData.summary.total_high_risk || 0}
+                value={crossSiteSummary.total_high_risk}
                 color="red"
               />
               <StatCard
                 label="Total Interventions"
-                value={crossSiteData.summary.total_interventions || 0}
+                value={crossSiteSummary.total_interventions}
                 color="purple"
               />
             </div>

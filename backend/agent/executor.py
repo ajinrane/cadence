@@ -23,6 +23,7 @@ class AgentExecutor:
         self.planner = AgentPlanner(llm)
         self.action_provider = action_provider
         self.llm = llm
+        self.resolved_patients: dict = {}  # name_lower → patient_id
 
     async def handle_message(self, message: str, context: dict | None = None) -> dict:
         """
@@ -38,6 +39,11 @@ class AgentExecutor:
                 "meta": dict,             # Cost/performance tracking
             }
         """
+        # Inject resolved patients into context so planner knows them
+        context = context or {}
+        if self.resolved_patients:
+            context["resolved_patients"] = self.resolved_patients
+
         # Step 1: Plan
         plan = await self.planner.plan(message, context)
 
@@ -54,6 +60,15 @@ class AgentExecutor:
                 "action_type": action.action_type.value if hasattr(action.action_type, 'value') else str(action.action_type),
                 "result": result,
             })
+
+            # Remember resolved patients for future turns
+            if action.action_type.value == "resolve_patient" and result.success:
+                data = result.data
+                if isinstance(data, dict) and data.get("resolved") and data.get("patient"):
+                    name = data["patient"].get("name", "").lower()
+                    pid = data.get("patient_id", "")
+                    if name and pid:
+                        self.resolved_patients[name] = pid
 
         # Step 4: Format response using results
         response_text = await self._format_response(
@@ -211,6 +226,7 @@ Keep it under 300 words. Be direct — CRCs are busy."""
     def reset(self):
         """Reset conversation state."""
         self.planner.reset_conversation()
+        self.resolved_patients.clear()
 
 
 def _safe_serialize(obj):

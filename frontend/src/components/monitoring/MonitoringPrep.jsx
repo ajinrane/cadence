@@ -77,11 +77,11 @@ function ChecklistItem({ item, visitId, onUpdate }) {
 
       {expanded && item.status === "needs_attention" && (
         <div className="px-4 pb-3 border-t border-amber-100 pt-2.5">
-          {item.affected_patients?.length > 0 && (
+          {item.patient_ids?.length > 0 && (
             <div className="mb-2">
               <span className="text-xs font-medium text-slate-500 block mb-1">Affected patients:</span>
               <div className="flex flex-wrap gap-1">
-                {item.affected_patients.map((pid) => (
+                {item.patient_ids.map((pid) => (
                   <span key={pid} className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-mono">
                     {pid}
                   </span>

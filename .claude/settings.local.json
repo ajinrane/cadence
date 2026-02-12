@@ -33,7 +33,17 @@
       "Bash(curl:*)",
       "Bash(python -m json.tool:*)",
       "Bash(npx vite:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(tasklist:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(python -m uvicorn:*)",
+      "Bash(python:*)",
+      "Bash(del \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\\\\backend\\\\_test_staff.py\")",
+      "Bash(where:*)",
+      "Bash(python3:*)",
+      "Bash(git -C \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\" status)",
+      "Bash(git -C \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\" diff --stat)",
+      "Bash(git -C \"c:\\\\Users\\\\waffl\\\\OneDrive\\\\Desktop\\\\CT_Scraper\" log --oneline -5)"
     ]
   },
   "hooks": {
