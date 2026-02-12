@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { api } from "./api/client";
 import AppLayout from "./components/layout/AppLayout";
 import CadenceChat from "./components/chat/CadenceChat";
@@ -11,14 +11,17 @@ import HandoffView from "./components/handoff/HandoffView";
 import KnowledgeBase from "./components/knowledge/KnowledgeBase";
 import StaffDirectory from "./components/staff/StaffDirectory";
 
+const AdminPanel = lazy(() => import("./components/admin/AdminPanel"));
+
 export default function App() {
   const [activePage, setActivePage] = useState("chat");
   const [currentSiteId, setCurrentSiteId] = useState("site_columbia");
   const [sites, setSites] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [dataVersion, setDataVersion] = useState(0);
+  const [currentUser, setCurrentUser] = useState(null);
 
-  // Health check + fetch sites on mount
+  // Health check + fetch sites + restore auth session on mount
   useEffect(() => {
     api.health()
       .then(() => setIsConnected(true))
@@ -30,6 +33,17 @@ export default function App() {
         setSites(siteList);
       })
       .catch(() => {});
+
+    // Restore auth session from localStorage
+    const token = localStorage.getItem("cadence_token");
+    if (token) {
+      api.me()
+        .then((user) => setCurrentUser(user))
+        .catch(() => {
+          localStorage.removeItem("cadence_token");
+          setCurrentUser(null);
+        });
+    }
   }, []);
 
   const handleNavigate = useCallback((page) => {
@@ -42,6 +56,17 @@ export default function App() {
 
   const handleDataChange = useCallback(() => {
     setDataVersion((v) => v + 1);
+  }, []);
+
+  const handleLogin = useCallback((token, user) => {
+    localStorage.setItem("cadence_token", token);
+    setCurrentUser(user);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem("cadence_token");
+    setCurrentUser(null);
+    setActivePage((prev) => (prev === "admin" ? "chat" : prev));
   }, []);
 
   const renderPage = () => {
@@ -68,6 +93,12 @@ export default function App() {
         return <StaffDirectory currentSiteId={currentSiteId} />;
       case "handoff":
         return <HandoffView currentSiteId={currentSiteId} />;
+      case "admin":
+        return (
+          <Suspense fallback={<div className="p-6 text-sm text-slate-400">Loading admin...</div>}>
+            <AdminPanel />
+          </Suspense>
+        );
       default:
         return <CadenceChat currentSiteId={currentSiteId} />;
     }
@@ -81,6 +112,9 @@ export default function App() {
       sites={sites}
       onSiteChange={handleSiteChange}
       isConnected={isConnected}
+      currentUser={currentUser}
+      onLogin={handleLogin}
+      onLogout={handleLogout}
     >
       {renderPage()}
     </AppLayout>

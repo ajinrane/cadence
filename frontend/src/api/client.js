@@ -1,11 +1,18 @@
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
+function getHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  const token = localStorage.getItem("cadence_token");
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
 async function get(path, params = {}) {
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
   Object.entries(params).forEach(([k, v]) => {
     if (v != null && v !== "") url.searchParams.set(k, v);
   });
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: getHeaders() });
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
   return res.json();
 }
@@ -13,7 +20,7 @@ async function get(path, params = {}) {
 async function post(path, body = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
@@ -23,8 +30,17 @@ async function post(path, body = {}) {
 async function patch(path, body = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: getHeaders(),
     body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+  return res.json();
+}
+
+async function del(path) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE",
+    headers: getHeaders(),
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
   return res.json();
@@ -97,4 +113,22 @@ export const api = {
   chat: (message, context) => post("/api/chat", { message, context }),
   chatReset: () => post("/api/chat/reset"),
   usage: () => get("/api/usage"),
+  // Auth
+  login: (email, password) => post("/api/auth/login", { email, password }),
+  me: () => get("/api/auth/me"),
+  // Admin
+  adminOverview: () => get("/api/admin/overview"),
+  adminOrganizations: () => get("/api/admin/organizations"),
+  adminCreateOrg: (data) => post("/api/admin/organizations", data),
+  adminSites: () => get("/api/admin/sites"),
+  adminCreateSite: (data) => post("/api/admin/sites", data),
+  adminUpdateSite: (id, data) => patch(`/api/admin/sites/${id}`, data),
+  adminUsers: () => get("/api/admin/users"),
+  adminCreateUser: (data) => post("/api/admin/users", data),
+  adminUpdateUser: (id, data) => patch(`/api/admin/users/${id}`, data),
+  adminDeleteUser: (id) => del(`/api/admin/users/${id}`),
+  adminTrials: () => get("/api/admin/trials"),
+  adminCreateTrial: (data) => post("/api/admin/trials", data),
+  adminEnrollSiteTrial: (siteId, data) => post(`/api/admin/sites/${siteId}/trials`, data),
+  adminUnenrollSiteTrial: (siteId, trialId) => del(`/api/admin/sites/${siteId}/trials/${trialId}`),
 };

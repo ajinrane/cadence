@@ -37,7 +37,7 @@ ACTION LAYER (swappable)
 - Frontend: React 18 + Tailwind CSS + Vite, deployed on Vercel (migrating to AWS Amplify)
 - Backend: Python 3.11 + FastAPI, will deploy on AWS Lambda + API Gateway
 - Database: In-memory seed data (migrating to Neon Postgres, then AWS RDS at scale)
-- Auth: Planned AWS Cognito (HIPAA eligible)
+- Auth: JWT (PyJWT) with role-based access, migrating to AWS Cognito (HIPAA eligible)
 - LLM: Claude API (Anthropic) or OpenAI, swappable via LLM_PROVIDER and LLM_MODEL env vars
 - Cost tracking built into LLM layer at /api/usage
 
@@ -85,7 +85,7 @@ Trials can span multiple sites (same trial_id, different site_id).
 ### Frontend (frontend/src/)
 - App.jsx — Root with state-based routing, dataVersion counter for cross-component refresh
 - components/
-  - layout/AppLayout.jsx — Sidebar nav + top bar with site name
+  - layout/AppLayout.jsx — Sidebar nav + top bar + login form + admin nav (role-gated)
   - chat/CadenceChat.jsx — Agent chat interface, triggers onDataChange on side effects
   - calendar/TaskCalendar.jsx — Week/day view task calendar, staff filter, refetches on dataVersion
   - patients/PatientRegistry.jsx — Patient table with CRC column, staff filter, reassign, refetches on dataVersion
@@ -95,8 +95,7 @@ Trials can span multiple sites (same trial_id, different site_id).
   - handoff/HandoffView.jsx — New CRC briefing document + Q&A
   - knowledge/KnowledgeBase.jsx — Browse/add/search three-tier knowledge (Promise.allSettled for resilience)
   - staff/StaffDirectory.jsx — Team workload overview, expandable cards with patients/tasks
-- hooks/useAuth.js — JWT token management
-- context/AuthContext.jsx — Auth state provider
+  - admin/AdminPanel.jsx — Admin panel with Overview, Sites, Users, Trials sub-tabs (lazy-loaded)
 - api/client.js — Centralized API client with JWT headers
 
 ## Design Conventions
@@ -162,6 +161,20 @@ Trials can span multiple sites (same trial_id, different site_id).
 - PATCH /api/patients/{id}/assign — Reassign patient primary CRC
 - GET /api/usage — LLM cost tracking
 - GET /api/dashboard — Summary stats
+- GET /api/admin/overview — Global stats (orgs, sites, trials, patients, users, staff, tasks, knowledge, LLM cost)
+- GET /api/admin/organizations — List organizations
+- POST /api/admin/organizations — Create organization
+- GET /api/admin/sites — List sites (enriched with patient/trial/staff/user counts)
+- POST /api/admin/sites — Create site
+- PATCH /api/admin/sites/{id} — Update site
+- GET /api/admin/users — List users
+- POST /api/admin/users — Create user
+- PATCH /api/admin/users/{id} — Update user
+- DELETE /api/admin/users/{id} — Soft-delete user
+- GET /api/admin/trials — List trials (enriched with site count, patient count, enrollments)
+- POST /api/admin/trials — Create trial
+- POST /api/admin/sites/{site_id}/trials — Enroll trial at site
+- DELETE /api/admin/sites/{site_id}/trials/{trial_id} — Remove trial enrollment
 
 ## Infrastructure Plan (not yet implemented)
 - Database: Neon Postgres (free tier) → AWS RDS at scale
@@ -262,3 +275,12 @@ Track what was built each session so context carries over. Update this at the en
 - Bug fix: cross-component refresh via dataVersion counter (chat creates task → calendar/patients refetch)
 - Bug fix: KnowledgeBase.jsx uses Promise.allSettled for resilience (partial failures don't break the page)
 - Bug fix: created frontend/.env for API URL (was missing, causing 404s without Vite proxy)
+
+### Session 7 — Honesty Pass + Admin Panel
+- Honesty pass: _send_reminder returns queued (not sent), _schedule_visit returns logged (not scheduled), pattern_detector seeds marked as seed_data with ui_note, planner system prompt has "WHAT YOU CAN DO" / "WHAT YOU CANNOT DO YET" sections
+- Auth system: backend/auth.py with JWT (PyJWT), in-memory user store, 4 seed users, role-based access
+- Admin panel: AdminPanel.jsx with Overview, Sites, Users, Trials sub-tabs (lazy-loaded)
+- Admin endpoints: 16 new /api/admin/* routes, all gated by require_admin dependency
+- AppLayout: inline login form, admin nav item visible only for admin/sponsor roles
+- Non-invasive: existing CRC endpoints stay public, auth only enforced on admin routes
+- Bug fix: TaskCalendar week view missing staffLookup prop on TaskCard

@@ -5,13 +5,17 @@ Multi-site: all endpoints accept optional site_id filter.
 """
 
 import os
+import random
+import uuid
 from dotenv import load_dotenv
 load_dotenv()
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+
+import auth
 
 from agent.llm import get_llm, usage_tracker
 from agent.executor import AgentExecutor
@@ -44,6 +48,7 @@ async def lifespan(app: FastAPI):
     global db, agent, task_manager, protocol_manager, monitoring_manager, handoff_generator, knowledge_manager, staff_manager, patient_resolver
 
     db = PatientDatabase(seed=42)
+    auth.init_users()
 
     # Initialize managers
     task_manager = TaskManager(db)
@@ -80,6 +85,7 @@ async def lifespan(app: FastAPI):
     print(f"   Interventions: {len(db.interventions)}")
     print(f"   Data queries: {len(db.data_queries)}")
     print(f"   Knowledge: {kg_stats['total']} entries (T1: {kg_stats['by_tier'][1]}, T2: {kg_stats['by_tier'][2]}, T3: {kg_stats['by_tier'][3]})")
+    print(f"   Users: {len(auth.users)}")
 
     yield
 
@@ -206,6 +212,57 @@ class KnowledgeCreate(BaseModel):
     author: Optional[str] = None
     trial_id: Optional[str] = None
     tags: Optional[list[str]] = []
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class UserCreate(BaseModel):
+    email: str
+    name: str
+    role: Optional[str] = "crc"
+    site_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    password: Optional[str] = "cadence123"
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    site_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    active: Optional[bool] = None
+    password: Optional[str] = None
+
+class OrgCreate(BaseModel):
+    name: str
+    type: Optional[str] = "clinical_site"
+
+class SiteAdminCreate(BaseModel):
+    name: str
+    organization_id: str
+    location: str
+    pi_name: str
+    crc_count: Optional[int] = 0
+
+class SiteAdminUpdate(BaseModel):
+    name: Optional[str] = None
+    location: Optional[str] = None
+    pi_name: Optional[str] = None
+    crc_count: Optional[int] = None
+
+class TrialCreate(BaseModel):
+    name: str
+    phase: str
+    condition: str
+    sponsor: str
+    expected_duration_weeks: Optional[int] = 52
+    visit_schedule: Optional[str] = ""
+
+class SiteTrialEnroll(BaseModel):
+    trial_id: str
+    enrolled: Optional[int] = 0
+    pi: Optional[str] = ""
 
 
 # -- Routes: Core -------------------------------------------------------------
@@ -1010,3 +1067,203 @@ async def ask_handoff(site_id: str, data: HandoffQuestion):
     context = {"site_id": site_id, "mode": "handoff_onboarding"}
     result = await agent.handle_message(data.question, context)
     return ChatResponse(**result)
+
+
+# -- Routes: Auth (public) ----------------------------------------------------
+
+@app.post("/api/auth/login")
+async def login(data: LoginRequest):
+    user = auth.authenticate(data.email, data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = auth.create_token(user)
+    return {"token": token, "user": user}
+
+
+@app.get("/api/auth/me")
+async def get_me(request: Request):
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+# -- Routes: Admin (requires admin/sponsor role) ------------------------------
+
+@app.get("/api/admin/overview")
+async def admin_overview(admin=Depends(auth.require_admin)):
+    return {
+        "organizations": len(db.organizations),
+        "sites": len(db.sites),
+        "trials": len(db.trials),
+        "patients": len(db.patients),
+        "users": len([u for u in auth.users if u["active"]]),
+        "staff": len(staff_manager.staff) if staff_manager else 0,
+        "tasks_pending": len([t for t in task_manager.tasks if t["status"] == "pending"]) if task_manager else 0,
+        "knowledge_entries": knowledge_manager.get_stats()["total"] if knowledge_manager else 0,
+        "llm_cost": usage_tracker.summary().get("total_cost", 0),
+    }
+
+
+# -- Admin: Organizations --
+
+@app.get("/api/admin/organizations")
+async def admin_list_orgs(admin=Depends(auth.require_admin)):
+    return {"organizations": db.organizations}
+
+
+@app.post("/api/admin/organizations")
+async def admin_create_org(data: OrgCreate, admin=Depends(auth.require_admin)):
+    org = {
+        "organization_id": f"org_{uuid.uuid4().hex[:8]}",
+        "name": data.name,
+        "type": data.type,
+    }
+    db.organizations.append(org)
+    return org
+
+
+# -- Admin: Sites --
+
+@app.get("/api/admin/sites")
+async def admin_list_sites(admin=Depends(auth.require_admin)):
+    enriched = []
+    for site in db.sites:
+        sid = site["site_id"]
+        enriched.append({
+            **site,
+            "patient_count": len([p for p in db.patients if p["site_id"] == sid]),
+            "trial_count": len([e for e in db.site_trial_enrollments if e["site_id"] == sid]),
+            "staff_count": len([s for s in staff_manager.staff if s["site_id"] == sid]) if staff_manager else 0,
+            "user_count": len([u for u in auth.users if u.get("site_id") == sid and u["active"]]),
+        })
+    return {"sites": enriched}
+
+
+@app.post("/api/admin/sites")
+async def admin_create_site(data: SiteAdminCreate, admin=Depends(auth.require_admin)):
+    # Verify organization exists
+    org = next((o for o in db.organizations if o["organization_id"] == data.organization_id), None)
+    if not org:
+        raise HTTPException(status_code=404, detail=f"Organization {data.organization_id} not found")
+    site = {
+        "site_id": f"site_{uuid.uuid4().hex[:8]}",
+        "organization_id": data.organization_id,
+        "name": data.name,
+        "location": data.location,
+        "pi_name": data.pi_name,
+        "crc_count": data.crc_count,
+    }
+    db.sites.append(site)
+    return site
+
+
+@app.patch("/api/admin/sites/{site_id}")
+async def admin_update_site(site_id: str, data: SiteAdminUpdate, admin=Depends(auth.require_admin)):
+    site = next((s for s in db.sites if s["site_id"] == site_id), None)
+    if not site:
+        raise HTTPException(status_code=404, detail=f"Site {site_id} not found")
+    for key in ("name", "location", "pi_name", "crc_count"):
+        val = getattr(data, key)
+        if val is not None:
+            site[key] = val
+    return site
+
+
+# -- Admin: Users --
+
+@app.get("/api/admin/users")
+async def admin_list_users(admin=Depends(auth.require_admin)):
+    return {"users": auth.list_users()}
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(data: UserCreate, admin=Depends(auth.require_admin)):
+    if any(u["email"] == data.email for u in auth.users):
+        raise HTTPException(status_code=409, detail=f"Email {data.email} already exists")
+    return auth.create_user(data.model_dump())
+
+
+@app.patch("/api/admin/users/{user_id}")
+async def admin_update_user(user_id: str, data: UserUpdate, admin=Depends(auth.require_admin)):
+    result = auth.update_user(user_id, data.model_dump(exclude_none=True))
+    if not result:
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    return result
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, admin=Depends(auth.require_admin)):
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    if not auth.delete_user(user_id):
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    return {"status": "ok", "message": f"User {user_id} deactivated"}
+
+
+# -- Admin: Trials --
+
+@app.get("/api/admin/trials")
+async def admin_list_trials(admin=Depends(auth.require_admin)):
+    enriched = []
+    for trial in db.trials:
+        tid = trial["trial_id"]
+        site_enrollments = [e for e in db.site_trial_enrollments if e["trial_id"] == tid]
+        enriched.append({
+            **trial,
+            "site_count": len(site_enrollments),
+            "total_enrolled": sum(e["enrolled"] for e in site_enrollments),
+            "patient_count": len([p for p in db.patients if p["trial_id"] == tid]),
+            "sites": site_enrollments,
+        })
+    return {"trials": enriched}
+
+
+@app.post("/api/admin/trials")
+async def admin_create_trial(data: TrialCreate, admin=Depends(auth.require_admin)):
+    trial = {
+        "trial_id": f"NCT{random.randint(10000000, 99999999):08d}",
+        "name": data.name,
+        "phase": data.phase,
+        "condition": data.condition,
+        "sponsor": data.sponsor,
+        "expected_duration_weeks": data.expected_duration_weeks,
+        "visit_schedule": data.visit_schedule,
+    }
+    db.trials.append(trial)
+    return trial
+
+
+@app.post("/api/admin/sites/{site_id}/trials")
+async def admin_enroll_site_trial(site_id: str, data: SiteTrialEnroll, admin=Depends(auth.require_admin)):
+    site = next((s for s in db.sites if s["site_id"] == site_id), None)
+    if not site:
+        raise HTTPException(status_code=404, detail=f"Site {site_id} not found")
+    trial = next((t for t in db.trials if t["trial_id"] == data.trial_id), None)
+    if not trial:
+        raise HTTPException(status_code=404, detail=f"Trial {data.trial_id} not found")
+    existing = next((e for e in db.site_trial_enrollments
+                     if e["site_id"] == site_id and e["trial_id"] == data.trial_id), None)
+    if existing:
+        raise HTTPException(status_code=409, detail="Trial already enrolled at this site")
+    enrollment = {
+        "site_id": site_id,
+        "trial_id": data.trial_id,
+        "enrolled": data.enrolled,
+        "pi": data.pi or site.get("pi_name", ""),
+    }
+    db.site_trial_enrollments.append(enrollment)
+    return enrollment
+
+
+@app.delete("/api/admin/sites/{site_id}/trials/{trial_id}")
+async def admin_unenroll_site_trial(site_id: str, trial_id: str, admin=Depends(auth.require_admin)):
+    idx = next(
+        (i for i, e in enumerate(db.site_trial_enrollments)
+         if e["site_id"] == site_id and e["trial_id"] == trial_id),
+        None,
+    )
+    if idx is None:
+        raise HTTPException(status_code=404, detail="Enrollment not found")
+    db.site_trial_enrollments.pop(idx)
+    return {"status": "ok", "message": f"Trial {trial_id} removed from site {site_id}"}

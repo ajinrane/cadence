@@ -439,6 +439,7 @@ export default function TaskCalendar({ currentSiteId, dataVersion }) {
                       onComplete={handleComplete}
                       onExpand={setExpandedTaskId}
                       isExpanded={expandedTaskId === task.id}
+                      staffLookup={staffLookup}
                     />
                   ))}
                   {dayTasks.length === 0 && (
