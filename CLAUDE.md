@@ -36,7 +36,7 @@ ACTION LAYER (swappable)
 ## Tech Stack
 - Frontend: React 18 + Tailwind CSS + Vite, deployed on Vercel (migrating to AWS Amplify)
 - Backend: Python 3.11 + FastAPI, will deploy on AWS Lambda + API Gateway
-- Database: In-memory seed data (migrating to Neon Postgres, then AWS RDS at scale)
+- Database: Neon Postgres (pgvector for RAG), asyncpg connection pool, repository pattern
 - Auth: JWT (PyJWT) with role-based access, migrating to AWS Cognito (HIPAA eligible)
 - LLM: Claude API (Anthropic) or OpenAI, swappable via LLM_PROVIDER and LLM_MODEL env vars
 - Cost tracking built into LLM layer at /api/usage
@@ -71,6 +71,7 @@ Trials can span multiple sites (same trial_id, different site_id).
     - handoff.py — HandoffGenerator (compiles site briefing for new CRCs, includes team section)
     - staff.py — StaffManager (8 seed staff across 3 sites, patient/task assignment, workload tracking)
   - patient_resolver.py — Fuzzy patient matching (exact ID → partial ID → name → contextual filters)
+  - embeddings.py — OpenAI text-embedding-3-small (1536d), MD5-cached, async batch
 - knowledge/
   - base_knowledge.py — Tier 1: foundational clinical trial knowledge (55 entries)
   - site_knowledge.py — Tier 2: site-specific institutional knowledge (35 seed entries)
@@ -79,7 +80,24 @@ Trials can span multiple sites (same trial_id, different site_id).
   - lifecycle.py — Entry status management (active/stale/draft/archived), validation, archival
   - pattern_detector.py — Analyzes intervention outcomes, generates knowledge suggestions
 - data/
-  - seed.py — Fake patient/trial/site data generator
+  - seed.py — Seed data constants (orgs, sites, trials, patient generator)
+- db/
+  - schema.sql — 18-table DDL with pgvector extension
+  - connection.py — asyncpg pool (Neon SSL), schema runner, seed status
+  - seed.py — One-time Postgres seed (imports from data/seed.py + knowledge modules)
+  - facade.py — DatabaseFacade (drop-in for PatientDatabase, loads from Postgres into cached lists)
+  - repositories/
+    - base.py — BaseRepository with pool + embedding provider
+    - sites.py — Organizations, sites, trials, enrollments
+    - patients.py — Patients with events/notes/interventions (JOINs for trial_name/site_name)
+    - tasks.py — Task CRUD + bulk insert
+    - staff.py — Staff CRUD + patient/task assignment
+    - knowledge.py — Knowledge entries + vector search (tier weighting + site boost) + lifecycle + suggestions
+    - protocols.py — Protocols + chunk + embed + vector search
+    - monitoring.py — Monitoring visits + JSONB checklists
+    - interventions.py — Intervention CRUD + effectiveness stats
+    - queries.py — Data query CRUD + stats
+    - auth.py — User CRUD (with password_hash for auth compat)
 - auth.py — JWT auth, user model, role-based access
 
 ### Frontend (frontend/src/)
@@ -184,8 +202,19 @@ Trials can span multiple sites (same trial_id, different site_id).
 - PATCH /api/preferences/me/{tab} — Update preferences for a specific tab
 - PATCH /api/preferences/me/first-login-complete — Mark first login complete
 
-## Infrastructure Plan (not yet implemented)
-- Database: Neon Postgres (free tier) → AWS RDS at scale
+## Database Architecture
+- **Neon Postgres** (serverless PostgreSQL 17.7) with pgvector extension
+- **asyncpg** connection pool (min_size=2, max_size=10, SSL for Neon)
+- **18 tables**: organizations, sites, trials, site_trial_enrollments, staff, patients, patient_events, patient_notes, interventions, data_queries, monitoring_visits, tasks, protocols, protocol_chunks, knowledge_entries, knowledge_suggestions, users, _seed_status
+- **Vector columns** (1536d, OpenAI text-embedding-3-small): knowledge_entries.embedding, protocol_chunks.embedding, patient_notes.embedding, knowledge_suggestions.embedding
+- **Repository pattern**: one repo per domain, all async, BaseRepository base class
+- **DatabaseFacade**: drop-in for PatientDatabase — loads from Postgres into cached lists at startup so all managers work unchanged. Write operations go through repos AND update cached lists.
+- **Seed**: deterministic (random.seed(42)), idempotent (_seed_status singleton), imports constants from data/seed.py + knowledge modules
+- **RAG search**: vector similarity with tier weighting (T2: 1.5x, T3: 1.3x) + site boost (0.3) + effectiveness/confidence bonuses. Keyword fallback when embeddings unavailable.
+- **Env vars**: DATABASE_URL (Neon connection string), OPENAI_API_KEY (for embeddings)
+
+## Infrastructure Plan
+- Database: Neon Postgres (free tier) → AWS RDS at scale (**done**)
 - Backend: AWS Lambda + API Gateway
 - Frontend: AWS Amplify
 - Auth: AWS Cognito (HIPAA eligible)
@@ -301,3 +330,17 @@ Track what was built each session so context carries over. Update this at the en
 - Preferences API: 3 new endpoints (GET/PATCH preferences/me, first-login-complete), user model extended with first_login, preferences, onboarded_tabs
 - Preference wiring: TaskCalendar (default_view), PatientRegistry (default_sort, needs_contact_days), SiteAnalytics (visible_cards), MonitoringPrep and KnowledgeBase accept preferences prop
 - All preferences have sensible defaults — app works identically without any customization
+
+### Session 9 — Postgres + pgvector + RAG Migration
+- **Database migration**: Moved from in-memory PatientDatabase to Neon Postgres with pgvector
+- **Schema**: 18 tables with pgvector extension, JSONB for complex nested data, TEXT for enums
+- **Connection layer**: asyncpg pool with Neon SSL, idempotent schema runner, seed status tracking
+- **Embedding provider**: OpenAI text-embedding-3-small (1536d), MD5-cached, async batch embedding
+- **Seed migration**: deterministic seeding of all 15 entity types (145 patients, 1355 events, 102 knowledge entries, 4 protocols, 8 staff, 4 users), embeddings for knowledge + protocols
+- **Repository layer**: 11 repository files (sites, patients, tasks, staff, knowledge, protocols, monitoring, interventions, queries, auth, base)
+- **Knowledge RAG**: vector similarity search with tier weighting (T2: 1.5x, T3: 1.3x), site boost (0.3), effectiveness/confidence bonuses; keyword fallback
+- **Protocol RAG**: vector similarity search on protocol chunks; keyword fallback
+- **DatabaseFacade**: drop-in replacement for PatientDatabase — loads from Postgres into cached lists so all managers (TaskManager, StaffManager, etc.) work unchanged
+- **main.py rewire**: lifespan rewritten for Postgres (pool → schema → seed → repos → facade → managers), all ~25 mutating routes persist through repos + update in-memory caches
+- **Zero frontend changes**: all API response shapes preserved exactly
+- 9 incremental commits, each verified against live Neon instance
