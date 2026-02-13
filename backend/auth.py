@@ -130,6 +130,20 @@ def get_current_user(request: Request) -> dict | None:
     return _safe_user(user)
 
 
+def require_auth(request: Request) -> dict:
+    """Requires login (any role). Returns user or raises 401."""
+    token = _extract_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = next((u for u in users if u["id"] == payload["sub"] and u["active"]), None)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return _safe_user(user)
+
+
 def require_admin(request: Request) -> dict:
     """Strict auth — returns user or raises 401/403."""
     token = _extract_token(request)

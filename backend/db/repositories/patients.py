@@ -3,6 +3,7 @@ Patient repository — patients, events, notes.
 JOINs trials + sites for trial_name/site_name (not stored in patients table).
 """
 
+import json
 import uuid
 from datetime import datetime
 
@@ -249,6 +250,63 @@ class PatientRepository(BaseRepository):
         if "interventions" not in p:
             p["interventions"] = []
         return p
+
+    async def bulk_insert_patients(self, patients: list[dict]) -> list[str]:
+        """Insert multiple patients. Returns list of successfully inserted patient_ids."""
+        if not patients:
+            return []
+        inserted_ids = []
+        for p in patients:
+            try:
+                enrollment_date = p["enrollment_date"]
+                if isinstance(enrollment_date, str):
+                    enrollment_date = datetime.strptime(enrollment_date, "%Y-%m-%d").date()
+                next_visit = p.get("next_visit_date")
+                if isinstance(next_visit, str):
+                    next_visit = datetime.strptime(next_visit, "%Y-%m-%d").date()
+                last_contact = p.get("last_contact_date")
+                if isinstance(last_contact, str):
+                    last_contact = datetime.strptime(last_contact, "%Y-%m-%d").date()
+
+                result = await self._execute(
+                    """INSERT INTO patients (
+                        patient_id, site_id, organization_id, name, age, sex, trial_id,
+                        status, enrollment_date, weeks_enrolled, dropout_risk_score,
+                        risk_factors, recommended_actions, next_visit_date,
+                        visits_completed, visits_missed, last_contact_date, phone, primary_crc_id
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+                    ON CONFLICT DO NOTHING""",
+                    p["patient_id"], p["site_id"], p["organization_id"], p["name"],
+                    p["age"], p["sex"], p["trial_id"], p["status"],
+                    enrollment_date, p.get("weeks_enrolled", 0), p.get("dropout_risk_score", 0.5),
+                    json.dumps(p.get("risk_factors", [])), json.dumps(p.get("recommended_actions", [])),
+                    next_visit, p.get("visits_completed", 0), p.get("visits_missed", 0),
+                    last_contact, p.get("phone"), p.get("primary_crc_id"),
+                )
+                # asyncpg execute returns "INSERT 0 1" on success, "INSERT 0 0" on conflict
+                if result and result.endswith("1"):
+                    inserted_ids.append(p["patient_id"])
+            except Exception:
+                pass
+        return inserted_ids
+
+    async def bulk_insert_events(self, events: list[dict]) -> int:
+        """Insert multiple patient events. Skips on conflict."""
+        count = 0
+        for e in events:
+            try:
+                event_date = e["date"]
+                if isinstance(event_date, str):
+                    event_date = datetime.strptime(event_date, "%Y-%m-%d").date()
+                await self._execute(
+                    """INSERT INTO patient_events (id, patient_id, type, date, note)
+                       VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING""",
+                    e["id"], e["patient_id"], e["type"], event_date, e.get("note", ""),
+                )
+                count += 1
+            except Exception:
+                pass
+        return count
 
     def _format_intervention(self, row: dict) -> dict:
         intv = dict(row)

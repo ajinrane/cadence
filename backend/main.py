@@ -12,6 +12,7 @@ load_dotenv()
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -329,6 +330,13 @@ class SiteTrialEnroll(BaseModel):
 class TabPreferences(BaseModel):
     preferences: dict
 
+class CSVPreviewRequest(BaseModel):
+    csv_content: str
+
+class CSVImportRequest(BaseModel):
+    csv_content: str
+    column_mapping: dict
+
 
 # -- Routes: Core -------------------------------------------------------------
 
@@ -465,6 +473,89 @@ async def get_patient_registry(
     patients = sorted(patients, key=key_fn, reverse=reverse)
 
     return {"patients": patients, "total": len(patients)}
+
+
+# -- Routes: Patient CSV Import -----------------------------------------------
+# These MUST appear before /api/patients/{patient_id} to avoid path conflicts.
+
+@app.get("/api/patients/import/template")
+async def get_import_template():
+    """Download CSV template with example rows."""
+    from db.repositories.import_patients import PatientImporter
+    template = PatientImporter.get_csv_template()
+    return PlainTextResponse(
+        content=template,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=patient_import_template.csv"},
+    )
+
+
+@app.post("/api/patients/import/preview")
+async def preview_patient_import(request: CSVPreviewRequest):
+    """Parse CSV and detect column mappings. No DB writes."""
+    from db.repositories.import_patients import PatientImporter
+    importer = PatientImporter(None, None, None)
+    try:
+        return importer.preview_csv(request.csv_content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/patients/import")
+async def import_patients(
+    request: CSVImportRequest,
+    user: dict = Depends(auth.require_auth),
+):
+    """Import patients from CSV. Site ID from JWT."""
+    if not db or not repos:
+        raise HTTPException(status_code=503, detail="Database not initialized")
+
+    site_id = user.get("site_id")
+    if not site_id:
+        raise HTTPException(status_code=400, detail="User must be assigned to a site")
+
+    embeddings = None
+    try:
+        from agent.embeddings import get_embedding_provider
+        embeddings = get_embedding_provider()
+    except Exception:
+        pass
+
+    from db.repositories.import_patients import PatientImporter
+    importer = PatientImporter(repos["patients"].pool, repos, embeddings)
+
+    try:
+        result = await importer.import_csv(
+            request.csv_content,
+            request.column_mapping,
+            site_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Post-import hooks
+    if result["success_count"] > 0:
+        # 1. Refresh facade patient cache
+        await db.refresh_patients()
+
+        # 2. Reassign all patients to CRCs by load
+        if staff_manager:
+            staff_manager._assign_patients()
+            # Persist CRC assignments for imported patients
+            for pid in result["imported_patient_ids"]:
+                patient = next((p for p in db.patients if p["patient_id"] == pid), None)
+                if patient and patient.get("primary_crc_id"):
+                    await repos["patients"].update_patient(pid, {
+                        "primary_crc_id": patient["primary_crc_id"]
+                    })
+
+        # 3. Regenerate tasks for all patients (includes new ones)
+        if task_manager:
+            task_manager._generate_tasks()
+            await repos["tasks"].bulk_insert(task_manager.tasks)
+            await db.refresh_tasks()
+
+    return result
 
 
 @app.get("/api/patients/{patient_id}")
