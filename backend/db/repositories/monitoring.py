@@ -29,8 +29,9 @@ class MonitoringRepository(BaseRepository):
         return self._format(row) if row else None
 
     async def create_visit(self, site_id: str, monitor_name: str,
-                           scheduled_date: str, status: str = "upcoming") -> dict:
-        visit_id = f"mon_{uuid.uuid4().hex[:8]}"
+                           scheduled_date: str, status: str = "upcoming",
+                           visit_id: str = None) -> dict:
+        visit_id = visit_id or f"mon_{uuid.uuid4().hex[:8]}"
         row = await self._fetchrow(
             """INSERT INTO monitoring_visits (id, site_id, monitor_name, scheduled_date, status, checklist)
                VALUES ($1, $2, $3, $4, $5, $6) RETURNING *""",
